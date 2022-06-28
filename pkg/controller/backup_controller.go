@@ -25,6 +25,7 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sync"
 	"time"
 
@@ -50,6 +51,7 @@ import (
 	snapshotterClientSet "github.com/kubernetes-csi/external-snapshotter/client/v4/clientset/versioned"
 	snapshotv1listers "github.com/kubernetes-csi/external-snapshotter/client/v4/listers/volumesnapshot/v1"
 
+	snapmoverv1alpha1 "github.com/konveyor/volume-snapshot-mover/api/v1alpha1"
 	"github.com/vmware-tanzu/velero/internal/storage"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	pkgbackup "github.com/vmware-tanzu/velero/pkg/backup"
@@ -627,6 +629,8 @@ func (c *backupController) runBackup(backup *pkgbackup.Request) error {
 	var volumeSnapshots []*snapshotv1api.VolumeSnapshot
 	var volumeSnapshotContents []*snapshotv1api.VolumeSnapshotContent
 	var volumeSnapshotClasses []*snapshotv1api.VolumeSnapshotClass
+	var volumeSnapshotBackups []*snapmoverv1alpha1.VolumeSnapshotBackup
+
 	if features.IsEnabled(velerov1api.CSIFeatureFlag) {
 		selector := label.NewSelectorForBackup(backup.Name)
 		// Listers are wrapped in a nil check out of caution, since they may not be populated based on the
@@ -652,6 +656,37 @@ func (c *backupController) runBackup(backup *pkgbackup.Request) error {
 				backupLog.Error(err)
 			}
 		}
+
+		//wait for all the VSBs to be complete
+		backupLog.Info("Fetching SnapMoverClient...")
+		volumeSnapMoverClient, err := GetVolumeSnapMoverClient()
+		if err != nil {
+			backupLog.Error(err)
+		}
+
+		//grab all the VSB from all the Namespaces included in the backup
+		backupLog.Info("Grabbing all the VSBs from all the Namespaces included in the backup...")
+		for _, ns := range backup.Spec.IncludedNamespaces {
+			tmpList := snapmoverv1alpha1.VolumeSnapshotBackupList{}
+			err := volumeSnapMoverClient.List(context.TODO(), &tmpList, kbclient.InNamespace(ns))
+			if err != nil {
+				backupLog.Error(err)
+			}
+
+			for _, item := range tmpList.Items {
+				volumeSnapshotBackups = append(volumeSnapshotBackups, &item)
+			}
+		}
+
+		backupLog.Info("List of VSBs: %v", volumeSnapshotBackups)
+
+		if len(volumeSnapshotBackups) > 0 {
+			err = c.checkIfVolumeSnapshotBackupsAreComplete(context.Background(), volumeSnapshotBackups)
+			if err != nil {
+				backupLog.Errorf("fail to wait for VolumeSnapshotBackups to be completed: %s", err.Error())
+			}
+		}
+
 		vsClassSet := sets.NewString()
 		for _, vsc := range volumeSnapshotContents {
 			// persist the volumesnapshotclasses referenced by vsc
@@ -908,6 +943,42 @@ func (c *backupController) checkVolumeSnapshotReadyToUse(ctx context.Context, vo
 	return eg.Wait()
 }
 
+func (c *backupController) checkIfVolumeSnapshotBackupsAreComplete(ctx context.Context, volumesnapshotbackups []*snapmoverv1alpha1.VolumeSnapshotBackup) error {
+	eg, _ := errgroup.WithContext(ctx)
+	// update this to configurable timeout
+	timeout := 10 * time.Minute
+	interval := 5 * time.Second
+
+	volumeSnapMoverClient, err := GetVolumeSnapMoverClient()
+	if err != nil {
+		return err
+	}
+
+	for _, vsb := range volumesnapshotbackups {
+		volumesnapshotbackup := vsb
+		eg.Go(func() error {
+			err := wait.PollImmediate(interval, timeout, func() (bool, error) {
+				tmpVSB := snapmoverv1alpha1.VolumeSnapshotBackup{}
+				err := volumeSnapMoverClient.Get(ctx, kbclient.ObjectKey{Namespace: volumesnapshotbackup.Namespace, Name: volumesnapshotbackup.Name}, &tmpVSB)
+				if err != nil {
+					return false, errors.Wrapf(err, fmt.Sprintf("failed to get volumesnapshotbackup %s/%s", volumesnapshotbackup.Namespace, volumesnapshotbackup.Name))
+				}
+				if len(tmpVSB.Status.Phase) == 0 || tmpVSB.Status.Phase != snapmoverv1alpha1.SnapMoverBackupPhaseCompleted {
+					log.Infof("[From velero-core-backup-controller]Waiting for volumesnapshotbackup to complete %s/%s. Retrying in %ds", volumesnapshotbackup.Namespace, volumesnapshotbackup.Name, interval/time.Second)
+					return false, nil
+				}
+
+				return true, nil
+			})
+			if err == wait.ErrWaitTimeout {
+				log.Errorf("Timed out awaiting reconciliation of volumesnapshotbackup %s/%s", volumesnapshotbackup.Namespace, volumesnapshotbackup.Name)
+			}
+			return err
+		})
+	}
+	return eg.Wait()
+}
+
 // deleteVolumeSnapshot delete VolumeSnapshot created during backup.
 // This is used to avoid deleting namespace in cluster triggers the VolumeSnapshot deletion,
 // which will cause snapshot deletion on cloud provider, then backup cannot restore the PV.
@@ -1021,4 +1092,14 @@ func (c *backupController) recreateVolumeSnapshotContent(vsc *snapshotv1api.Volu
 	}
 
 	return nil
+}
+
+func GetVolumeSnapMoverClient() (kbclient.Client, error) {
+	client2, err := kbclient.New(config.GetConfigOrDie(), kbclient.Options{})
+	if err != nil {
+		return nil, err
+	}
+	snapmoverv1alpha1.AddToScheme(client2.Scheme())
+
+	return client2, err
 }

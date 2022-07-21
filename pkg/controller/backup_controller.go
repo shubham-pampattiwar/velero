@@ -666,24 +666,21 @@ func (c *backupController) runBackup(backup *pkgbackup.Request) error {
 
 		//grab all the VSB from all the Namespaces included in the backup
 		backupLog.Info("Grabbing all the VSBs from all the Namespaces included in the backup...")
-		for _, ns := range backup.Spec.IncludedNamespaces {
-			tmpList := snapmoverv1alpha1.VolumeSnapshotBackupList{}
-			err := volumeSnapMoverClient.List(context.TODO(), &tmpList, kbclient.InNamespace(ns))
-			if err != nil {
-				backupLog.Error(err)
-			}
 
-			for _, item := range tmpList.Items {
-				volumeSnapshotBackups = append(volumeSnapshotBackups, &item)
-			}
+		tmpList := snapmoverv1alpha1.VolumeSnapshotBackupList{}
+		err = volumeSnapMoverClient.List(context.TODO(), &tmpList, &kbclient.ListOptions{
+			LabelSelector: selector,
+		})
+		if err != nil {
+			backupLog.Error(err)
 		}
 
-		backupLog.Info("List of VSBs: %v", volumeSnapshotBackups)
+		backupLog.Info("List of all VSBs: %v", volumeSnapshotBackups)
 
 		if len(volumeSnapshotBackups) > 0 {
 			err = c.checkIfVolumeSnapshotBackupsAreComplete(context.Background(), volumeSnapshotBackups)
 			if err != nil {
-				backupLog.Errorf("fail to wait for VolumeSnapshotBackups to be completed: %s", err.Error())
+				backupLog.Errorf("failed to wait for VolumeSnapshotBackups to be completed: %s", err.Error())
 			}
 		}
 

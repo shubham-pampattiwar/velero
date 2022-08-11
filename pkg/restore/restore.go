@@ -1252,11 +1252,18 @@ func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupReso
 	// check if we want to treat the error as a warning, in some cases the creation call might not get executed due to object API validations
 	// and Velero might not get the already exists error type but in reality the object already exists
 	objectExists := false
+	fromCluster, err := resourceClient.Get(name, metav1.GetOptions{})
+	if err != nil {
+		ctx.log.Infof("Error retrieving cluster version of %s: %v", kube.NamespaceAndName(obj), err)
+		warnings.Add(namespace, err)
+		return warnings, errs
+	}
+
 	if !isAlreadyExistsError {
-		_, err := resourceClient.Get(obj.GetName(), metav1.GetOptions{})
 		if !apierrors.IsNotFound(err) {
 			objectExists = true
 		}
+
 		if err != nil && objectExists {
 			errs.Add(namespace, err)
 			return warnings, errs
@@ -1264,11 +1271,13 @@ func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupReso
 	}
 
 	if isAlreadyExistsError || objectExists {
-		fromCluster, err := resourceClient.Get(name, metav1.GetOptions{})
-		if err != nil {
-			ctx.log.Infof("Error retrieving cluster version of %s: %v", kube.NamespaceAndName(obj), err)
-			warnings.Add(namespace, err)
-			return warnings, errs
+		if fromCluster != nil {
+			fromCluster, err = resourceClient.Get(name, metav1.GetOptions{})
+			if err != nil {
+				ctx.log.Infof("Error retrieving cluster version of %s: %v", kube.NamespaceAndName(obj), err)
+				warnings.Add(namespace, err)
+				return warnings, errs
+			}
 		}
 		// Remove insubstantial metadata.
 		fromCluster, err = resetMetadataAndStatus(fromCluster)

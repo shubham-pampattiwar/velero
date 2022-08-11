@@ -1257,7 +1257,7 @@ func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupReso
 		if !apierrors.IsNotFound(err) {
 			objectExists = true
 		}
-		if err != nil && !apierrors.IsNotFound(err) {
+		if err != nil && objectExists {
 			errs.Add(namespace, err)
 			return warnings, errs
 		}

@@ -47,6 +47,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/discovery"
 	"github.com/vmware-tanzu/velero/pkg/generated/clientset/versioned/fake"
 	informers "github.com/vmware-tanzu/velero/pkg/generated/informers/externalversions"
+	"github.com/vmware-tanzu/velero/pkg/itemoperation"
 	"github.com/vmware-tanzu/velero/pkg/metrics"
 	"github.com/vmware-tanzu/velero/pkg/persistence"
 	persistencemocks "github.com/vmware-tanzu/velero/pkg/persistence/mocks"
@@ -72,6 +73,13 @@ func (b *fakeBackupper) BackupWithResolvers(logger logrus.FieldLogger, backup *p
 	backupItemActionResolver framework.BackupItemActionResolverV2, itemSnapshotterResolver framework.ItemSnapshotterResolver,
 	volumeSnapshotterGetter pkgbackup.VolumeSnapshotterGetter) error {
 	args := b.Called(logger, backup, backupFile, backupItemActionResolver, itemSnapshotterResolver, volumeSnapshotterGetter)
+	return args.Error(0)
+}
+
+func (b *fakeBackupper) FinalizeBackup(logger logrus.FieldLogger, backup *pkgbackup.Request, inBackupFile io.Reader, outBackupFile io.Writer,
+	backupItemActionResolver framework.BackupItemActionResolverV2,
+	asyncBIAOperations []*itemoperation.BackupOperation) error {
+	args := b.Called(logger, backup, inBackupFile, outBackupFile, backupItemActionResolver, asyncBIAOperations)
 	return args.Error(0)
 }
 

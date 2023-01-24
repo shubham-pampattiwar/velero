@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"time"
 
 	jsonpatch "github.com/evanphx/json-patch"
@@ -254,16 +255,24 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// don't defer CleanupClients here, since it was already called above.
 
 	if len(actions) > 0 {
-		// Download the tarball
-		backupFile, err := downloadToTempFile(backup.Name, backupStore, log)
+		// Download the tarballs
+		backupFiles, err := downloadToTempFile(backup.Name, backupStore, log)
 
 		if err != nil {
 			log.WithError(err).Errorf("Unable to download tarball for backup %s, skipping associated DeleteItemAction plugins", backup.Name)
 		} else {
-			defer closeAndRemoveFile(backupFile, r.logger)
+			defer func() {
+				for _, f := range backupFiles {
+					closeAndRemoveFile(f, r.logger)
+				}
+			}()
+			backupReaders := make([]io.Reader, len(backupFiles))
+			for i := range backupFiles {
+				backupReaders[i] = backupFiles[i]
+			}
 			ctx := &delete.Context{
 				Backup:          backup,
-				BackupReader:    backupFile,
+				BackupReaders:   backupReaders,
 				Actions:         actions,
 				Log:             r.logger,
 				DiscoveryHelper: r.discoveryHelper,

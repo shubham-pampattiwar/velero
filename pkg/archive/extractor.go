@@ -42,15 +42,27 @@ func NewExtractor(log logrus.FieldLogger, fs filesystem.Interface) *Extractor {
 }
 
 // UnzipAndExtractBackup extracts a reader on a gzipped tarball to a local temp directory
-func (e *Extractor) UnzipAndExtractBackup(src io.Reader) (string, error) {
-	gzr, err := gzip.NewReader(src)
-	if err != nil {
-		e.log.Infof("error creating gzip reader: %v", err)
-		return "", err
+func (e *Extractor) UnzipAndExtractBackup(sources []io.Reader) (string, error) {
+	var gzrs []*gzip.Reader
+	defer func() {
+		for _, gzr := range gzrs {
+			gzr.Close()
+		}
+	}()
+	for _, src := range sources {
+		gzr, err := gzip.NewReader(src)
+		if err != nil {
+			e.log.Infof("error creating gzip reader: %v", err)
+			return "", err
+		}
+		gzrs = append(gzrs, gzr)
 	}
-	defer gzr.Close()
 
-	return e.readBackup(tar.NewReader(gzr))
+	var tarReaders []*tar.Reader
+	for _, gzr := range gzrs {
+		tarReaders = append(tarReaders, tar.NewReader(gzr))
+	}
+	return e.readBackup(tarReaders)
 }
 
 func (e *Extractor) writeFile(target string, tarRdr *tar.Reader) error {
@@ -66,46 +78,51 @@ func (e *Extractor) writeFile(target string, tarRdr *tar.Reader) error {
 	return nil
 }
 
-func (e *Extractor) readBackup(tarRdr *tar.Reader) (string, error) {
+// Reads from a slice of tar.Reader objects. Files in the later tar archives will overwrite files
+// with the same path in the same archive. This allows later updates to "modify" files in the
+// archive without having to recreate the entire archive.
+func (e *Extractor) readBackup(tarRdrs []*tar.Reader) (string, error) {
 	dir, err := e.fs.TempDir("", "")
 	if err != nil {
 		e.log.Infof("error creating temp dir: %v", err)
 		return "", err
 	}
 
-	for {
-		header, err := tarRdr.Next()
+	for _, tarRdr := range tarRdrs {
+		for {
+			header, err := tarRdr.Next()
 
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			e.log.Infof("error reading tar: %v", err)
-			return "", err
-		}
-
-		target := filepath.Join(dir, header.Name) //nolint:gosec
-
-		switch header.Typeflag {
-		case tar.TypeDir:
-			err := e.fs.MkdirAll(target, header.FileInfo().Mode())
+			if err == io.EOF {
+				break
+			}
 			if err != nil {
-				e.log.Infof("mkdirall error: %v", err)
+				e.log.Infof("error reading tar: %v", err)
 				return "", err
 			}
 
-		case tar.TypeReg:
-			// make sure we have the directory created
-			err := e.fs.MkdirAll(filepath.Dir(target), header.FileInfo().Mode())
-			if err != nil {
-				e.log.Infof("mkdirall error: %v", err)
-				return "", err
-			}
+			target := filepath.Join(dir, header.Name) //nolint:gosec
 
-			// create the file
-			if err := e.writeFile(target, tarRdr); err != nil {
-				e.log.Infof("error copying: %v", err)
-				return "", err
+			switch header.Typeflag {
+			case tar.TypeDir:
+				err := e.fs.MkdirAll(target, header.FileInfo().Mode())
+				if err != nil {
+					e.log.Infof("mkdirall error: %v", err)
+					return "", err
+				}
+
+			case tar.TypeReg:
+				// make sure we have the directory created
+				err := e.fs.MkdirAll(filepath.Dir(target), header.FileInfo().Mode())
+				if err != nil {
+					e.log.Infof("mkdirall error: %v", err)
+					return "", err
+				}
+
+				// create the file
+				if err := e.writeFile(target, tarRdr); err != nil {
+					e.log.Infof("error copying: %v", err)
+					return "", err
+				}
 			}
 		}
 	}

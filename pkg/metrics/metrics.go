@@ -488,9 +488,13 @@ func (m *ServerMetrics) RegisterPodVolumeOpLatencyGauge(node, pvbName, opName, b
 }
 
 // SetBackupTarballSizeBytesGauge records the size, in bytes, of a backup tarball.
-func (m *ServerMetrics) SetBackupTarballSizeBytesGauge(backupSchedule string, size int64) {
+func (m *ServerMetrics) SetBackupTarballSizeBytesGauge(backupSchedule string, size int64, addVal bool) {
 	if g, ok := m.metrics[backupTarballSizeBytesGauge].(*prometheus.GaugeVec); ok {
-		g.WithLabelValues(backupSchedule).Set(float64(size))
+		if addVal {
+			g.WithLabelValues(backupSchedule).Add(float64(size))
+		} else {
+			g.WithLabelValues(backupSchedule).Set(float64(size))
+		}
 	}
 }
 

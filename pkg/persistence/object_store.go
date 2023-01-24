@@ -61,12 +61,15 @@ type BackupStore interface {
 	ListBackups() ([]string, error)
 
 	PutBackup(info BackupInfo) error
+	PutBackupMetadata(backup string, backupMetadata io.Reader) error
 	PutBackupItemOperations(backup string, backupItemOperations io.Reader) error
+	PutBackupContentsFinalUpdates(backup string, finalUpdates io.Reader) error
 	GetBackupMetadata(name string) (*velerov1api.Backup, error)
 	GetBackupItemOperations(name string) ([]*itemoperation.BackupOperation, error)
 	GetBackupVolumeSnapshots(name string) ([]*volume.Snapshot, error)
 	GetPodVolumeBackups(name string) ([]*velerov1api.PodVolumeBackup, error)
-	GetBackupContents(name string) (io.ReadCloser, error)
+	GetBackupContents(name string) ([]io.ReadCloser, error)
+	//GetBackupContentsFinalUpdates(name string) (io.ReadCloser, error)
 	GetCSIVolumeSnapshots(name string) ([]*snapshotv1api.VolumeSnapshot, error)
 	GetCSIVolumeSnapshotContents(name string) ([]*snapshotv1api.VolumeSnapshotContent, error)
 	GetCSIVolumeSnapshotClasses(name string) ([]*snapshotv1api.VolumeSnapshotClass, error)
@@ -314,6 +317,10 @@ func (s *objectBackupStore) GetBackupMetadata(name string) (*velerov1api.Backup,
 	return backupObj, nil
 }
 
+func (s *objectBackupStore) PutBackupMetadata(backup string, backupMetadata io.Reader) error {
+	return seekAndPutObject(s.objectStore, s.bucket, s.layout.getBackupMetadataKey(backup), backupMetadata)
+}
+
 func (s *objectBackupStore) GetBackupVolumeSnapshots(name string) ([]*volume.Snapshot, error) {
 	// if the volumesnapshots file doesn't exist, we don't want to return an error, since
 	// a legacy backup or a backup with no snapshots would not have this file, so check for
@@ -483,8 +490,22 @@ func (s *objectBackupStore) GetPodVolumeBackups(name string) ([]*velerov1api.Pod
 	return podVolumeBackups, nil
 }
 
-func (s *objectBackupStore) GetBackupContents(name string) (io.ReadCloser, error) {
-	return s.objectStore.GetObject(s.bucket, s.layout.getBackupContentsKey(name))
+func (s *objectBackupStore) GetBackupContents(name string) ([]io.ReadCloser, error) {
+	var contents []io.ReadCloser
+	backup, err := s.objectStore.GetObject(s.bucket, s.layout.getBackupContentsKey(name))
+	if err != nil {
+		return nil, err
+	}
+	contents = append(contents, backup)
+	updates, err := tryGet(s.objectStore, s.bucket, s.layout.getBackupContentsFinalUpdatesKey(name))
+	if err != nil {
+		backup.Close()
+		return nil, err
+	}
+	if updates != nil {
+		contents = append(contents, updates)
+	}
+	return contents, nil
 }
 
 func (s *objectBackupStore) BackupExists(bucket, backupName string) (bool, error) {
@@ -545,10 +566,16 @@ func (s *objectBackupStore) PutBackupItemOperations(backup string, backupItemOpe
 	return seekAndPutObject(s.objectStore, s.bucket, s.layout.getBackupItemOperationsKey(backup), backupItemOperations)
 }
 
+func (s *objectBackupStore) PutBackupContentsFinalUpdates(backup string, finalUpdates io.Reader) error {
+	return seekAndPutObject(s.objectStore, s.bucket, s.layout.getBackupContentsFinalUpdatesKey(backup), finalUpdates)
+}
+
 func (s *objectBackupStore) GetDownloadURL(target velerov1api.DownloadTarget) (string, error) {
 	switch target.Kind {
 	case velerov1api.DownloadTargetKindBackupContents:
 		return s.objectStore.CreateSignedURL(s.bucket, s.layout.getBackupContentsKey(target.Name), DownloadURLTTL)
+	case velerov1api.DownloadTargetKindBackupContentsFinalUpdates:
+		return s.objectStore.CreateSignedURL(s.bucket, s.layout.getBackupContentsFinalUpdatesKey(target.Name), DownloadURLTTL)
 	case velerov1api.DownloadTargetKindBackupLog:
 		return s.objectStore.CreateSignedURL(s.bucket, s.layout.getBackupLogKey(target.Name), DownloadURLTTL)
 	case velerov1api.DownloadTargetKindBackupVolumeSnapshots:

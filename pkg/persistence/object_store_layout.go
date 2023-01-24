@@ -77,6 +77,10 @@ func (l *ObjectStoreLayout) getBackupContentsKey(backup string) string {
 	return path.Join(l.subdirs["backups"], backup, fmt.Sprintf("%s.tar.gz", backup))
 }
 
+func (l *ObjectStoreLayout) getBackupContentsFinalUpdatesKey(backup string) string {
+	return path.Join(l.subdirs["backups"], backup, fmt.Sprintf("%s-final.tar.gz", backup))
+}
+
 func (l *ObjectStoreLayout) getBackupLogKey(backup string) string {
 	return path.Join(l.subdirs["backups"], backup, fmt.Sprintf("%s-logs.gz", backup))
 }

@@ -31,6 +31,7 @@ type DownloadTargetKind string
 const (
 	DownloadTargetKindBackupLog                       DownloadTargetKind = "BackupLog"
 	DownloadTargetKindBackupContents                  DownloadTargetKind = "BackupContents"
+	DownloadTargetKindBackupContentsFinalUpdates      DownloadTargetKind = "BackupContentsFinalUpdates"
 	DownloadTargetKindBackupVolumeSnapshots           DownloadTargetKind = "BackupVolumeSnapshots"
 	DownloadTargetKindBackupItemOperations            DownloadTargetKind = "BackupItemOperations"
 	DownloadTargetKindBackupResourceList              DownloadTargetKind = "BackupResourceList"

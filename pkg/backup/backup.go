@@ -42,8 +42,10 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/client"
 	"github.com/vmware-tanzu/velero/pkg/discovery"
 	velerov1client "github.com/vmware-tanzu/velero/pkg/generated/clientset/versioned/typed/velero/v1"
+	"github.com/vmware-tanzu/velero/pkg/itemoperation"
 	"github.com/vmware-tanzu/velero/pkg/kuberesource"
 	"github.com/vmware-tanzu/velero/pkg/plugin/framework"
+	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
 	biav2 "github.com/vmware-tanzu/velero/pkg/plugin/velero/backupitemaction/v2"
 	vsv1 "github.com/vmware-tanzu/velero/pkg/plugin/velero/volumesnapshotter/v1"
 	"github.com/vmware-tanzu/velero/pkg/podexec"
@@ -67,6 +69,9 @@ type Backupper interface {
 	BackupWithResolvers(log logrus.FieldLogger, backupRequest *Request, backupFile io.Writer,
 		backupItemActionResolver framework.BackupItemActionResolverV2, itemSnapshotterResolver framework.ItemSnapshotterResolver,
 		volumeSnapshotterGetter VolumeSnapshotterGetter) error
+	FinalizeBackup(log logrus.FieldLogger, backupRequest *Request, backupFile io.Writer,
+		backupItemActionResolver framework.BackupItemActionResolverV2,
+		asyncBIAOperations []*itemoperation.BackupOperation) error
 }
 
 // kubernetesBackupper implements Backupper.
@@ -365,7 +370,7 @@ func (kb *kubernetesBackupper) BackupWithResolvers(log logrus.FieldLogger,
 				return
 			}
 
-			if backedUp := kb.backupItem(log, item.groupResource, itemBackupper, &unstructured, item.preferredGVR); backedUp {
+			if backedUp := kb.backupItem(log, item.groupResource, itemBackupper, &unstructured, item.preferredGVR, false); backedUp {
 				backedUpGroupResources[item.groupResource] = true
 			}
 		}()
@@ -415,8 +420,8 @@ func (kb *kubernetesBackupper) BackupWithResolvers(log logrus.FieldLogger,
 	return nil
 }
 
-func (kb *kubernetesBackupper) backupItem(log logrus.FieldLogger, gr schema.GroupResource, itemBackupper *itemBackupper, unstructured *unstructured.Unstructured, preferredGVR schema.GroupVersionResource) bool {
-	backedUpItem, err := itemBackupper.backupItem(log, unstructured, gr, preferredGVR, false)
+func (kb *kubernetesBackupper) backupItem(log logrus.FieldLogger, gr schema.GroupResource, itemBackupper *itemBackupper, unstructured *unstructured.Unstructured, preferredGVR schema.GroupVersionResource, finalize bool) bool {
+	backedUpItem, err := itemBackupper.backupItem(log, unstructured, gr, preferredGVR, false, finalize)
 	if aggregate, ok := err.(kubeerrs.Aggregate); ok {
 		log.WithField("name", unstructured.GetName()).Infof("%d errors encountered backup up item", len(aggregate.Errors()))
 		// log each error separately so we get error location info in the log, and an
@@ -469,7 +474,7 @@ func (kb *kubernetesBackupper) backupCRD(log logrus.FieldLogger, gr schema.Group
 	}
 	log.Infof("Found associated CRD %s to add to backup", gr.String())
 
-	kb.backupItem(log, gvr.GroupResource(), itemBackupper, unstructured, gvr)
+	kb.backupItem(log, gvr.GroupResource(), itemBackupper, unstructured, gvr, false)
 }
 
 func (kb *kubernetesBackupper) writeBackupVersion(tw *tar.Writer) error {
@@ -489,6 +494,112 @@ func (kb *kubernetesBackupper) writeBackupVersion(tw *tar.Writer) error {
 	if _, err := tw.Write([]byte(versionString)); err != nil {
 		return errors.WithStack(err)
 	}
+	return nil
+}
+
+func (kb *kubernetesBackupper) FinalizeBackup(log logrus.FieldLogger,
+	backupRequest *Request,
+	backupFile io.Writer,
+	backupItemActionResolver framework.BackupItemActionResolverV2,
+	asyncBIAOperations []*itemoperation.BackupOperation) error {
+	gzippedData := gzip.NewWriter(backupFile)
+	defer gzippedData.Close()
+
+	tw := tar.NewWriter(gzippedData)
+	defer tw.Close()
+
+	var err error
+	backupRequest.ResolvedActions, err = backupItemActionResolver.ResolveActions(kb.discoveryHelper, log)
+	if err != nil {
+		log.WithError(errors.WithStack(err)).Debugf("Error from backupItemActionResolver.ResolveActions")
+		return err
+	}
+
+	backupRequest.BackedUpItems = map[itemKey]struct{}{}
+
+	// set up a temp dir for the itemCollector to use to temporarily
+	// store items as they're scraped from the API.
+	tempDir, err := ioutil.TempDir("", "")
+	if err != nil {
+		return errors.Wrap(err, "error creating temp dir for backup")
+	}
+	defer os.RemoveAll(tempDir)
+
+	collector := &itemCollector{
+		log:                   log,
+		backupRequest:         backupRequest,
+		discoveryHelper:       kb.discoveryHelper,
+		dynamicFactory:        kb.dynamicFactory,
+		cohabitatingResources: cohabitatingResources(),
+		dir:                   tempDir,
+		pageSize:              kb.clientPageSize,
+	}
+
+	// Get item list from itemoperation.BackupOperation.Spec.ItemsToUpdate
+	var resourceIDs []velero.ResourceIdentifier
+	for _, operation := range asyncBIAOperations {
+		if len(operation.Spec.ItemsToUpdate) != 0 {
+			resourceIDs = append(resourceIDs, operation.Spec.ItemsToUpdate...)
+		}
+	}
+	items := collector.getItemsFromResourceIdentifiers(resourceIDs)
+	log.WithField("progress", "").Infof("Collected %d items from the async BIA operations ItemsToUpdate list", len(items))
+
+	itemBackupper := &itemBackupper{
+		backupRequest:   backupRequest,
+		tarWriter:       tw,
+		dynamicFactory:  kb.dynamicFactory,
+		discoveryHelper: kb.discoveryHelper,
+	}
+
+	backedUpGroupResources := map[schema.GroupResource]bool{}
+	totalItems := len(items)
+
+	for i, item := range items {
+		log.WithFields(map[string]interface{}{
+			"progress":  "",
+			"resource":  item.groupResource.String(),
+			"namespace": item.namespace,
+			"name":      item.name,
+		}).Infof("Processing item")
+
+		// use an anonymous func so we can defer-close/remove the file
+		// as soon as we're done with it
+		func() {
+			var unstructured unstructured.Unstructured
+
+			f, err := os.Open(item.path)
+			if err != nil {
+				log.WithError(errors.WithStack(err)).Error("Error opening file containing item")
+				return
+			}
+			defer f.Close()
+			defer os.Remove(f.Name())
+
+			if err := json.NewDecoder(f).Decode(&unstructured); err != nil {
+				log.WithError(errors.WithStack(err)).Error("Error decoding JSON from file")
+				return
+			}
+
+			if backedUp := kb.backupItem(log, item.groupResource, itemBackupper, &unstructured, item.preferredGVR, true); backedUp {
+				backedUpGroupResources[item.groupResource] = true
+			}
+		}()
+
+		// updated total is computed as "how many items we've backed up so far, plus
+		// how many items we know of that are remaining"
+		totalItems = len(backupRequest.BackedUpItems) + (len(items) - (i + 1))
+
+		log.WithFields(map[string]interface{}{
+			"progress":  "",
+			"resource":  item.groupResource.String(),
+			"namespace": item.namespace,
+			"name":      item.name,
+		}).Infof("Backed up %d items out of an estimated total of %d (estimate will change throughout the backup)", len(backupRequest.BackedUpItems), totalItems)
+	}
+
+	log.WithField("progress", "").Infof("Backed up a total of %d items", len(backupRequest.BackedUpItems))
+
 	return nil
 }
 

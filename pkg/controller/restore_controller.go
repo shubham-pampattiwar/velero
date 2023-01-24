@@ -479,11 +479,15 @@ func (c *restoreController) runValidatedRestore(restore *api.Restore, info backu
 	}
 	snapshotItemResolver := framework.NewItemSnapshotterResolver(itemSnapshotters)
 
-	backupFile, err := downloadToTempFile(restore.Spec.BackupName, info.backupStore, restoreLog)
+	backupFiles, err := downloadToTempFile(restore.Spec.BackupName, info.backupStore, restoreLog)
 	if err != nil {
 		return errors.Wrap(err, "error downloading backup")
 	}
-	defer closeAndRemoveFile(backupFile, c.logger)
+	defer func() {
+		for _, f := range backupFiles {
+			closeAndRemoveFile(f, c.logger)
+		}
+	}()
 
 	listOpts := &client.ListOptions{
 		LabelSelector: labels.Set(map[string]string{
@@ -509,13 +513,17 @@ func (c *restoreController) runValidatedRestore(restore *api.Restore, info backu
 	for i := range podVolumeBackupList.Items {
 		podVolumeBackups = append(podVolumeBackups, &podVolumeBackupList.Items[i])
 	}
+	backupReaders := make([]io.Reader, len(backupFiles))
+	for i := range backupFiles {
+		backupReaders[i] = backupFiles[i]
+	}
 	restoreReq := pkgrestore.Request{
 		Log:              restoreLog,
 		Restore:          restore,
 		Backup:           info.backup,
 		PodVolumeBackups: podVolumeBackups,
 		VolumeSnapshots:  volumeSnapshots,
-		BackupReader:     backupFile,
+		BackupReaders:    backupReaders,
 	}
 	restoreWarnings, restoreErrors := c.restorer.RestoreWithResolvers(restoreReq, actionsResolver, snapshotItemResolver,
 		pluginManager)
@@ -605,39 +613,49 @@ func putResults(restore *api.Restore, results map[string]results.Result, backupS
 	return nil
 }
 
-func downloadToTempFile(backupName string, backupStore persistence.BackupStore, logger logrus.FieldLogger) (*os.File, error) {
-	readCloser, err := backupStore.GetBackupContents(backupName)
+func downloadToTempFile(backupName string, backupStore persistence.BackupStore, logger logrus.FieldLogger) ([]*os.File, error) {
+	readClosers, err := backupStore.GetBackupContents(backupName)
 	if err != nil {
 		return nil, err
 	}
-	defer readCloser.Close()
-
-	file, err := ioutil.TempFile("", backupName)
-	if err != nil {
-		return nil, errors.Wrap(err, "error creating Backup temp file")
-	}
-
-	n, err := io.Copy(file, readCloser)
-	if err != nil {
-		//Temporary file has been created if we go here. And some problems occurs such as network interruption and
-		//so on. So we close and remove temporary file first to prevent residual file.
-		closeAndRemoveFile(file, logger)
-		return nil, errors.Wrap(err, "error copying Backup to temp file")
-	}
+	defer func() {
+		for _, readCloser := range readClosers {
+			readCloser.Close()
+		}
+	}()
 
 	log := logger.WithField("backup", backupName)
+	var files []*os.File
+	for _, readCloser := range readClosers {
+		file, err := ioutil.TempFile("", backupName)
+		if err != nil {
+			return nil, errors.Wrap(err, "error creating Backup temp file")
+		}
+		files = append(files, file)
 
-	log.WithFields(logrus.Fields{
-		"fileName": file.Name(),
-		"bytes":    n,
-	}).Debug("Copied Backup to file")
+		n, err := io.Copy(file, readCloser)
+		if err != nil {
+			//Temporary file has been created if we go here. And some problems occurs such as network interruption and
+			//so on. So we close and remove temporary file first to prevent residual file.
+			for _, f := range files {
+				closeAndRemoveFile(f, logger)
+			}
+			return nil, errors.Wrap(err, "error copying Backup to temp file")
+		}
+		log.WithFields(logrus.Fields{
+			"fileName": file.Name(),
+			"bytes":    n,
+		}).Debug("Copied Backup to file")
 
-	if _, err := file.Seek(0, 0); err != nil {
-		closeAndRemoveFile(file, logger)
-		return nil, errors.Wrap(err, "error resetting Backup file offset")
+		if _, err := file.Seek(0, 0); err != nil {
+			for _, f := range files {
+				closeAndRemoveFile(f, logger)
+			}
+			return nil, errors.Wrap(err, "error resetting Backup file offset")
+		}
 	}
 
-	return file, nil
+	return files, nil
 }
 
 type restoreLogger struct {

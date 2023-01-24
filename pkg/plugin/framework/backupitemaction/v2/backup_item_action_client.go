@@ -76,15 +76,15 @@ func (c *BackupItemActionGRPCClient) AppliesTo() (velero.ResourceSelector, error
 	}, nil
 }
 
-func (c *BackupItemActionGRPCClient) Execute(item runtime.Unstructured, backup *api.Backup) (runtime.Unstructured, []velero.ResourceIdentifier, string, error) {
+func (c *BackupItemActionGRPCClient) Execute(item runtime.Unstructured, backup *api.Backup) (runtime.Unstructured, []velero.ResourceIdentifier, string, bool, error) {
 	itemJSON, err := json.Marshal(item.UnstructuredContent())
 	if err != nil {
-		return nil, nil, "", errors.WithStack(err)
+		return nil, nil, "", false, errors.WithStack(err)
 	}
 
 	backupJSON, err := json.Marshal(backup)
 	if err != nil {
-		return nil, nil, "", errors.WithStack(err)
+		return nil, nil, "", false, errors.WithStack(err)
 	}
 
 	req := &protobiav2.ExecuteRequest{
@@ -95,12 +95,12 @@ func (c *BackupItemActionGRPCClient) Execute(item runtime.Unstructured, backup *
 
 	res, err := c.grpcClient.Execute(context.Background(), req)
 	if err != nil {
-		return nil, nil, "", common.FromGRPCError(err)
+		return nil, nil, "", false, common.FromGRPCError(err)
 	}
 
 	var updatedItem unstructured.Unstructured
 	if err := json.Unmarshal(res.Item, &updatedItem); err != nil {
-		return nil, nil, "", errors.WithStack(err)
+		return nil, nil, "", false, errors.WithStack(err)
 	}
 
 	var additionalItems []velero.ResourceIdentifier
@@ -118,7 +118,7 @@ func (c *BackupItemActionGRPCClient) Execute(item runtime.Unstructured, backup *
 		additionalItems = append(additionalItems, newItem)
 	}
 
-	return &updatedItem, additionalItems, res.OperationID, nil
+	return &updatedItem, additionalItems, res.OperationID, res.UpdateAdditionalItemsAfterOperation, nil
 }
 
 func (c *BackupItemActionGRPCClient) Progress(operationID string, backup *api.Backup) (velero.OperationProgress, error) {
@@ -166,4 +166,10 @@ func (c *BackupItemActionGRPCClient) Cancel(operationID string, backup *api.Back
 	}
 
 	return nil
+}
+
+// This shouldn't be called on the GRPC client since the RestartableBackupItemAction won't delegate
+// this method
+func (c *BackupItemActionGRPCClient) Name() string {
+	return ""
 }

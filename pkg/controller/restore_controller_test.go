@@ -19,6 +19,7 @@ package controller
 import (
 	"bytes"
 	"context"
+	"io"
 	"io/ioutil"
 	"testing"
 	"time"
@@ -459,7 +460,7 @@ func TestProcessQueueItem(t *testing.T) {
 				errors.Velero = append(errors.Velero, "error uploading log file to object storage: "+test.putRestoreLogErr.Error())
 			}
 			if test.expectedRestorerCall != nil {
-				backupStore.On("GetBackupContents", test.backup.Name).Return(ioutil.NopCloser(bytes.NewReader([]byte("hello world"))), nil)
+				backupStore.On("GetBackupContents", test.backup.Name).Return([]io.ReadCloser{ioutil.NopCloser(bytes.NewReader([]byte("hello world")))}, nil)
 
 				restorer.On("RestoreWithResolvers", mock.Anything, mock.Anything, mock.Anything, mock.Anything,
 					mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(warnings, errors)
@@ -796,7 +797,7 @@ func (r *fakeRestorer) Restore(
 	actions []riav2.RestoreItemAction,
 	volumeSnapshotterGetter pkgrestore.VolumeSnapshotterGetter,
 ) (results.Result, results.Result) {
-	res := r.Called(info.Log, info.Restore, info.Backup, info.BackupReader, actions)
+	res := r.Called(info.Log, info.Restore, info.Backup, info.BackupReaders, actions)
 
 	r.calledWithArg = *info.Restore
 
@@ -808,7 +809,7 @@ func (r *fakeRestorer) RestoreWithResolvers(req pkgrestore.Request,
 	itemSnapshotterResolver framework.ItemSnapshotterResolver,
 	volumeSnapshotterGetter pkgrestore.VolumeSnapshotterGetter,
 ) (results.Result, results.Result) {
-	res := r.Called(req.Log, req.Restore, req.Backup, req.BackupReader, resolver, itemSnapshotterResolver,
+	res := r.Called(req.Log, req.Restore, req.Backup, req.BackupReaders, resolver, itemSnapshotterResolver,
 		r.kbClient, volumeSnapshotterGetter)
 
 	r.calledWithArg = *req.Restore

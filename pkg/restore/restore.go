@@ -80,12 +80,12 @@ type Request struct {
 	Backup           *velerov1api.Backup
 	PodVolumeBackups []*velerov1api.PodVolumeBackup
 	VolumeSnapshots  []*volume.Snapshot
-	BackupReader     io.Reader
+	BackupReaders    []io.Reader
 }
 
 // Restorer knows how to restore a backup.
 type Restorer interface {
-	// Restore restores the backup data from backupReader, returning warnings and errors.
+	// Restore restores the backup data from backupReaders, returning warnings and errors.
 	Restore(req Request,
 		actions []riav2.RestoreItemAction,
 		volumeSnapshotterGetter VolumeSnapshotterGetter,
@@ -282,7 +282,7 @@ func (kr *kubernetesRestorer) RestoreWithResolvers(
 
 	restoreCtx := &restoreContext{
 		backup:                         req.Backup,
-		backupReader:                   req.BackupReader,
+		backupReaders:                  req.BackupReaders,
 		restore:                        req.Restore,
 		resourceIncludesExcludes:       resourceIncludesExcludes,
 		resourceStatusIncludesExcludes: restoreStatusIncludesExcludes,
@@ -323,7 +323,7 @@ func (kr *kubernetesRestorer) RestoreWithResolvers(
 
 type restoreContext struct {
 	backup                         *velerov1api.Backup
-	backupReader                   io.Reader
+	backupReaders                  []io.Reader
 	restore                        *velerov1api.Restore
 	restoreDir                     string
 	resourceIncludesExcludes       *collections.IncludesExcludes
@@ -405,7 +405,7 @@ func (ctx *restoreContext) execute() (Result, Result) {
 
 	ctx.log.Infof("Starting restore of backup %s", kube.NamespaceAndName(ctx.backup))
 
-	dir, err := archive.NewExtractor(ctx.log, ctx.fileSystem).UnzipAndExtractBackup(ctx.backupReader)
+	dir, err := archive.NewExtractor(ctx.log, ctx.fileSystem).UnzipAndExtractBackup(ctx.backupReaders)
 	if err != nil {
 		ctx.log.Infof("error unzipping and extracting: %v", err)
 		errs.AddVeleroError(err)

@@ -47,16 +47,16 @@ func TestInvokeDeleteItemActionsRunForCorrectItems(t *testing.T) {
 		name         string
 		backup       *velerov1api.Backup
 		apiResources []*test.APIResource
-		tarball      io.Reader
+		tarballs     []io.Reader
 		actions      map[*recordResourcesAction][]string // recordResourceActions are the plugins that will capture item ids, the []string values are the ids we'll test against.
 	}{
 		{
 			name:   "single action with no selector runs for all items",
 			backup: builder.ForBackup("velero", "velero").Result(),
-			tarball: test.NewTarWriter(t).
+			tarballs: []io.Reader{test.NewTarWriter(t).
 				AddItems("pods", builder.ForPod("ns-1", "pod-1").Result(), builder.ForPod("ns-2", "pod-2").Result()).
 				AddItems("persistentvolumes", builder.ForPersistentVolume("pv-1").Result(), builder.ForPersistentVolume("pv-2").Result()).
-				Done(),
+				Done()},
 			apiResources: []*test.APIResource{test.Pods(), test.PVs()},
 			actions: map[*recordResourcesAction][]string{
 				new(recordResourcesAction): {"ns-1/pod-1", "ns-2/pod-2", "pv-1", "pv-2"},
@@ -65,10 +65,10 @@ func TestInvokeDeleteItemActionsRunForCorrectItems(t *testing.T) {
 		{
 			name:   "single action with a resource selector for namespaced resources runs only for matching resources",
 			backup: builder.ForBackup("velero", "velero").Result(),
-			tarball: test.NewTarWriter(t).
+			tarballs: []io.Reader{test.NewTarWriter(t).
 				AddItems("pods", builder.ForPod("ns-1", "pod-1").Result(), builder.ForPod("ns-2", "pod-2").Result()).
 				AddItems("persistentvolumes", builder.ForPersistentVolume("pv-1").Result(), builder.ForPersistentVolume("pv-2").Result()).
-				Done(),
+				Done()},
 			apiResources: []*test.APIResource{test.Pods(), test.PVs()},
 			actions: map[*recordResourcesAction][]string{
 				new(recordResourcesAction).ForResource("pods"): {"ns-1/pod-1", "ns-2/pod-2"},
@@ -77,10 +77,10 @@ func TestInvokeDeleteItemActionsRunForCorrectItems(t *testing.T) {
 		{
 			name:   "single action with a resource selector for cluster-scoped resources runs only for matching resources",
 			backup: builder.ForBackup("velero", "velero").Result(),
-			tarball: test.NewTarWriter(t).
+			tarballs: []io.Reader{test.NewTarWriter(t).
 				AddItems("pods", builder.ForPod("ns-1", "pod-1").Result(), builder.ForPod("ns-2", "pod-2").Result()).
 				AddItems("persistentvolumes", builder.ForPersistentVolume("pv-1").Result(), builder.ForPersistentVolume("pv-2").Result()).
-				Done(),
+				Done()},
 			apiResources: []*test.APIResource{test.Pods(), test.PVs()},
 			actions: map[*recordResourcesAction][]string{
 				new(recordResourcesAction).ForResource("persistentvolumes"): {"pv-1", "pv-2"},
@@ -89,11 +89,11 @@ func TestInvokeDeleteItemActionsRunForCorrectItems(t *testing.T) {
 		{
 			name:   "single action with a namespace selector runs only for resources in that namespace",
 			backup: builder.ForBackup("velero", "velero").Result(),
-			tarball: test.NewTarWriter(t).
+			tarballs: []io.Reader{test.NewTarWriter(t).
 				AddItems("pods", builder.ForPod("ns-1", "pod-1").Result(), builder.ForPod("ns-2", "pod-2").Result()).
 				AddItems("persistentvolumeclaims", builder.ForPersistentVolumeClaim("ns-1", "pvc-1").Result(), builder.ForPersistentVolumeClaim("ns-2", "pvc-2").Result()).
 				AddItems("persistentvolumes", builder.ForPersistentVolume("pv-1").Result(), builder.ForPersistentVolume("pv-2").Result()).
-				Done(),
+				Done()},
 			apiResources: []*test.APIResource{test.Pods(), test.PVCs(), test.PVs()},
 			actions: map[*recordResourcesAction][]string{
 				new(recordResourcesAction).ForNamespace("ns-1"): {"ns-1/pod-1", "ns-1/pvc-1"},
@@ -102,11 +102,11 @@ func TestInvokeDeleteItemActionsRunForCorrectItems(t *testing.T) {
 		{
 			name:   "multiple actions, each with a different resource selector using short name, run for matching resources",
 			backup: builder.ForBackup("velero", "velero").Result(),
-			tarball: test.NewTarWriter(t).
+			tarballs: []io.Reader{test.NewTarWriter(t).
 				AddItems("pods", builder.ForPod("ns-1", "pod-1").Result(), builder.ForPod("ns-2", "pod-2").Result()).
 				AddItems("persistentvolumeclaims", builder.ForPersistentVolumeClaim("ns-1", "pvc-1").Result(), builder.ForPersistentVolumeClaim("ns-2", "pvc-2").Result()).
 				AddItems("persistentvolumes", builder.ForPersistentVolume("pv-1").Result(), builder.ForPersistentVolume("pv-2").Result()).
-				Done(),
+				Done()},
 			apiResources: []*test.APIResource{test.Pods(), test.PVCs(), test.PVs()},
 			actions: map[*recordResourcesAction][]string{
 				new(recordResourcesAction).ForResource("po"): {"ns-1/pod-1", "ns-2/pod-2"},
@@ -116,10 +116,10 @@ func TestInvokeDeleteItemActionsRunForCorrectItems(t *testing.T) {
 		{
 			name:   "actions with selectors that don't match anything don't run for any resources",
 			backup: builder.ForBackup("velero", "velero").Result(),
-			tarball: test.NewTarWriter(t).
+			tarballs: []io.Reader{test.NewTarWriter(t).
 				AddItems("pods", builder.ForPod("ns-1", "pod-1").Result()).
 				AddItems("persistentvolumeclaims", builder.ForPersistentVolumeClaim("ns-2", "pvc-2").Result()).
-				Done(),
+				Done()},
 			apiResources: []*test.APIResource{test.Pods(), test.PVCs(), test.PVs()},
 			actions: map[*recordResourcesAction][]string{
 				new(recordResourcesAction).ForNamespace("ns-1").ForResource("persistentvolumeclaims"): nil,
@@ -129,10 +129,10 @@ func TestInvokeDeleteItemActionsRunForCorrectItems(t *testing.T) {
 		{
 			name:   "single action with label selector runs only for those items",
 			backup: builder.ForBackup("velero", "velero").Result(),
-			tarball: test.NewTarWriter(t).
+			tarballs: []io.Reader{test.NewTarWriter(t).
 				AddItems("pods", builder.ForPod("ns-1", "pod-1").ObjectMeta(builder.WithLabels("app", "app1")).Result(), builder.ForPod("ns-2", "pod-2").Result()).
 				AddItems("persistentvolumeclaims", builder.ForPersistentVolumeClaim("ns-1", "pvc-1").Result(), builder.ForPersistentVolumeClaim("ns-2", "pvc-2").ObjectMeta(builder.WithLabels("app", "app1")).Result()).
-				Done(),
+				Done()},
 			apiResources: []*test.APIResource{test.Pods(), test.PVCs()},
 			actions: map[*recordResourcesAction][]string{
 				new(recordResourcesAction).ForLabelSelector("app=app1"): {"ns-1/pod-1", "ns-2/pvc-2"},
@@ -141,8 +141,8 @@ func TestInvokeDeleteItemActionsRunForCorrectItems(t *testing.T) {
 		{
 			name:   "success if resources dir does not exist",
 			backup: builder.ForBackup("velero", "velero").Result(),
-			tarball: test.NewTarWriter(t).
-				Done(),
+			tarballs: []io.Reader{test.NewTarWriter(t).
+				Done()},
 			apiResources: []*test.APIResource{test.Pods(), test.PVCs()},
 			actions: map[*recordResourcesAction][]string{
 				new(recordResourcesAction).ForNamespace("ns-1").ForResource("persistentvolumeclaims"): nil,
@@ -167,7 +167,7 @@ func TestInvokeDeleteItemActionsRunForCorrectItems(t *testing.T) {
 
 			c := &Context{
 				Backup:          tc.backup,
-				BackupReader:    tc.tarball,
+				BackupReaders:   tc.tarballs,
 				Filesystem:      fs,
 				DiscoveryHelper: h.discoveryHelper,
 				Actions:         actions,

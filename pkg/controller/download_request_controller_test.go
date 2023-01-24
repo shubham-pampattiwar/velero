@@ -115,6 +115,7 @@ var _ = Describe("Download Request Reconciler", func() {
 				func(logrus.FieldLogger) clientmgmt.Manager { return pluginManager },
 				NewFakeObjectBackupStoreGetter(backupStores),
 				velerotest.NewLogger(),
+				nil,
 			)
 
 			if test.backupLocation != nil && test.expectGetsURL {

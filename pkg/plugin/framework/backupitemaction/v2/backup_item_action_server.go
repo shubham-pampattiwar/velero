@@ -107,7 +107,7 @@ func (s *BackupItemActionGRPCServer) Execute(
 		return nil, common.NewGRPCError(errors.WithStack(err))
 	}
 
-	updatedItem, additionalItems, operationID, err := impl.Execute(&item, &backup)
+	updatedItem, additionalItems, operationID, updateAdditionalItemsAfterOperation, err := impl.Execute(&item, &backup)
 	if err != nil {
 		return nil, common.NewGRPCError(err)
 	}
@@ -125,8 +125,9 @@ func (s *BackupItemActionGRPCServer) Execute(
 	}
 
 	res := &protobiav2.ExecuteResponse{
-		Item:        updatedItemJSON,
-		OperationID: operationID,
+		Item:                                updatedItemJSON,
+		OperationID:                         operationID,
+		UpdateAdditionalItemsAfterOperation: updateAdditionalItemsAfterOperation,
 	}
 
 	for _, item := range additionalItems {
@@ -209,4 +210,10 @@ func backupResourceIdentifierToProto(id velero.ResourceIdentifier) *proto.Resour
 		Namespace: id.Namespace,
 		Name:      id.Name,
 	}
+}
+
+// This shouldn't be called on the GRPC server since the server won't ever receive this request, as
+// the RestartableBackupItemAction in Velero won't delegate this to the server
+func (c *BackupItemActionGRPCServer) Name() string {
+	return ""
 }

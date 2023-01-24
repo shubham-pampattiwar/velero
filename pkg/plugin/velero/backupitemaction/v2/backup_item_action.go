@@ -29,6 +29,9 @@ import (
 
 // BackupItemAction is an actor that performs an operation on an individual item being backed up.
 type BackupItemAction interface {
+	// Name returns the name of this BIA
+	Name() string
+
 	// AppliesTo returns information about which resources this action should be invoked for.
 	// A BackupItemAction's Execute function will only be invoked on items that match the returned
 	// selector. A zero-valued ResourceSelector matches all resources.
@@ -37,8 +40,13 @@ type BackupItemAction interface {
 	// Execute allows the BackupItemAction to perform arbitrary logic with the item being backed up,
 	// including mutating the item itself prior to backup. The item (unmodified or modified)
 	// should be returned, along with an optional slice of ResourceIdentifiers specifying
-	// additional related items that should be backed up.
-	Execute(item runtime.Unstructured, backup *api.Backup) (runtime.Unstructured, []velero.ResourceIdentifier, string, error)
+	// additional related items that should be backed up, an optional operationID for actions which
+	// initiate asynchronous actions, and a bool which indicates whether the provided additional items
+	// need to be updated in the Backup after async action processing. This last field will be ignored
+	// if operationID is empty, and should not be filled in unless the resource must be updated in the
+	// backup after async operations complete (i.e. some of the item's kubernetes metadata will be updated
+	// during the asynch operation which will be required during restore)
+	Execute(item runtime.Unstructured, backup *api.Backup) (runtime.Unstructured, []velero.ResourceIdentifier, string, bool, error)
 
 	// Progress allows the BackupItemAction to report on progress of an asynchronous action.
 	// For the passed-in operation, the plugin will return an OperationProgress struct, indicating

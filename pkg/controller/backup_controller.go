@@ -766,12 +766,16 @@ func (c *backupController) runBackup(backup *pkgbackup.Request) error {
 	case logCounter.GetCount(logrus.ErrorLevel) > 0:
 		if inProgressOperations {
 			backup.Status.Phase = velerov1api.BackupPhaseWaitingForPluginOperationsPartiallyFailed
+		} else if backup.Status.AsyncBackupItemOperationsAttempted > 0 {
+			backup.Status.Phase = velerov1api.BackupPhaseFinalizingAfterPluginOperationsPartiallyFailed
 		} else {
 			backup.Status.Phase = velerov1api.BackupPhasePartiallyFailed
 		}
 	default:
 		if inProgressOperations {
 			backup.Status.Phase = velerov1api.BackupPhaseWaitingForPluginOperations
+		} else if backup.Status.AsyncBackupItemOperationsAttempted > 0 {
+			backup.Status.Phase = velerov1api.BackupPhaseFinalizingAfterPluginOperations
 		} else {
 			backup.Status.Phase = velerov1api.BackupPhaseCompleted
 		}
@@ -807,13 +811,15 @@ func (c *backupController) runBackup(backup *pkgbackup.Request) error {
 func recordBackupMetrics(log logrus.FieldLogger, backup *velerov1api.Backup, backupFile *os.File, serverMetrics *metrics.ServerMetrics, finalize bool) {
 	backupScheduleName := backup.GetLabels()[velerov1api.ScheduleNameLabel]
 
-	var backupSizeBytes int64
-	if backupFileStat, err := backupFile.Stat(); err != nil {
-		log.WithError(errors.WithStack(err)).Error("Error getting backup file info")
-	} else {
-		backupSizeBytes = backupFileStat.Size()
+	if backupFile != nil {
+		var backupSizeBytes int64
+		if backupFileStat, err := backupFile.Stat(); err != nil {
+			log.WithError(errors.WithStack(err)).Error("Error getting backup file info")
+		} else {
+			backupSizeBytes = backupFileStat.Size()
+		}
+		serverMetrics.SetBackupTarballSizeBytesGauge(backupScheduleName, backupSizeBytes)
 	}
-	serverMetrics.SetBackupTarballSizeBytesGauge(backupScheduleName, backupSizeBytes)
 
 	if backup.Status.CompletionTimestamp != nil {
 		backupDuration := backup.Status.CompletionTimestamp.Time.Sub(backup.Status.StartTimestamp.Time)

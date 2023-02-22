@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"io/ioutil"
+	"os"
 
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
@@ -131,37 +132,39 @@ func (r *backupFinalizerReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, errors.WithStack(err)
 	}
 
-	// Call itemBackupper.BackupItem for the list of items updated by async operations
 	backupRequest := &pkgbackup.Request{
 		Backup:          backup,
 		StorageLocation: location,
 	}
-	log.Info("Setting up finalized backup temp file")
-	inBackupFile, err := downloadToTempFile(backup.Name, backupStore, log)
-	if err != nil {
-		return ctrl.Result{}, errors.Wrap(err, "error downloading backup")
-	}
-	defer closeAndRemoveFile(inBackupFile, log)
-	outBackupFile, err := ioutil.TempFile("", "")
-	if err != nil {
-		log.WithError(err).Error("error creating temp file for backup")
-		return ctrl.Result{}, errors.WithStack(err)
-	}
-	defer closeAndRemoveFile(outBackupFile, log)
+	var outBackupFile *os.File
+	if len(operations) > 0 {
+		// Call itemBackupper.BackupItem for the list of items updated by async operations
+		log.Info("Setting up finalized backup temp file")
+		inBackupFile, err := downloadToTempFile(backup.Name, backupStore, log)
+		if err != nil {
+			return ctrl.Result{}, errors.Wrap(err, "error downloading backup")
+		}
+		defer closeAndRemoveFile(inBackupFile, log)
+		outBackupFile, err = ioutil.TempFile("", "")
+		if err != nil {
+			log.WithError(err).Error("error creating temp file for backup")
+			return ctrl.Result{}, errors.WithStack(err)
+		}
+		defer closeAndRemoveFile(outBackupFile, log)
 
-	log.Info("Getting backup item actions")
-	actions, err := pluginManager.GetBackupItemActionsV2()
-	if err != nil {
-		log.WithError(err).Error("error getting Backup Item Actions")
-		return ctrl.Result{}, errors.WithStack(err)
+		log.Info("Getting backup item actions")
+		actions, err := pluginManager.GetBackupItemActionsV2()
+		if err != nil {
+			log.WithError(err).Error("error getting Backup Item Actions")
+			return ctrl.Result{}, errors.WithStack(err)
+		}
+		backupItemActionsResolver := framework.NewBackupItemActionResolverV2(actions)
+		err = r.backupper.FinalizeBackup(log, backupRequest, inBackupFile, outBackupFile, backupItemActionsResolver, operations)
+		if err != nil {
+			log.WithError(err).Error("error finalizing Backup")
+			return ctrl.Result{}, errors.WithStack(err)
+		}
 	}
-	backupItemActionsResolver := framework.NewBackupItemActionResolverV2(actions)
-	err = r.backupper.FinalizeBackup(log, backupRequest, inBackupFile, outBackupFile, backupItemActionsResolver, operations)
-	if err != nil {
-		log.WithError(err).Error("error finalizing Backup")
-		return ctrl.Result{}, errors.WithStack(err)
-	}
-
 	backupScheduleName := backupRequest.GetLabels()[velerov1api.ScheduleNameLabel]
 	switch backup.Status.Phase {
 	case velerov1api.BackupPhaseFinalizingAfterPluginOperations:
@@ -185,9 +188,11 @@ func (r *backupFinalizerReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	if err != nil {
 		return ctrl.Result{}, errors.Wrap(err, "error uploading backup json")
 	}
-	err = backupStore.PutBackupContents(backup.Name, outBackupFile)
-	if err != nil {
-		return ctrl.Result{}, errors.Wrap(err, "error uploading backup final contents")
+	if len(operations) > 0 {
+		err = backupStore.PutBackupContents(backup.Name, outBackupFile)
+		if err != nil {
+			return ctrl.Result{}, errors.Wrap(err, "error uploading backup final contents")
+		}
 	}
 	return ctrl.Result{}, nil
 }

@@ -615,7 +615,7 @@ func (ctx *restoreContext) processSelectedResource(
 
 				ns := getNamespace(
 					logger,
-					archive.GetItemFilePath(ctx.restoreDir, "namespaces", "", namespace),
+					archive.GetItemFilePath(ctx.restoreDir, "namespaces", "", namespace, ""),
 					selectedItem.targetNamespace,
 				)
 				_, nsCreated, err := kube.EnsureNamespaceExistsAndIsReady(
@@ -937,7 +937,7 @@ func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupReso
 		// If the namespace scoped resource should be restored, ensure that the
 		// namespace into which the resource is being restored into exists.
 		// This is the *remapped* namespace that we are ensuring exists.
-		nsToEnsure := getNamespace(ctx.log, archive.GetItemFilePath(ctx.restoreDir, "namespaces", "", obj.GetNamespace()), namespace)
+		nsToEnsure := getNamespace(ctx.log, archive.GetItemFilePath(ctx.restoreDir, "namespaces", "", obj.GetNamespace(), ""), namespace)
 		if _, nsCreated, err := kube.EnsureNamespaceExistsAndIsReady(nsToEnsure, ctx.namespaceClient, ctx.resourceTerminatingTimeout); err != nil {
 			errs.AddVeleroError(err)
 			return warnings, errs
@@ -1161,7 +1161,7 @@ func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupReso
 		obj = unstructuredObj
 
 		for _, additionalItem := range executeOutput.AdditionalItems {
-			itemPath := archive.GetItemFilePath(ctx.restoreDir, additionalItem.GroupResource.String(), additionalItem.Namespace, additionalItem.Name)
+			itemPath := archive.GetItemFilePath(ctx.restoreDir, additionalItem.GroupResource.String(), additionalItem.Namespace, additionalItem.Name, "")
 
 			if _, err := ctx.fileSystem.Stat(itemPath); err != nil {
 				ctx.log.WithError(err).WithFields(logrus.Fields{
@@ -1935,7 +1935,7 @@ func (ctx *restoreContext) getSelectedRestoreableItems(resource, targetNamespace
 	}
 
 	for _, item := range items {
-		itemPath := archive.GetItemFilePath(ctx.restoreDir, resource, originalNamespace, item)
+		itemPath := archive.GetItemFilePath(ctx.restoreDir, resource, originalNamespace, item, "")
 
 		obj, err := archive.Unmarshal(ctx.fileSystem, itemPath)
 		if err != nil {

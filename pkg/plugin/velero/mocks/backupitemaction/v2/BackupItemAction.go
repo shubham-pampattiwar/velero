@@ -67,7 +67,7 @@ func (_m *BackupItemAction) Cancel(operationID string, backup *v1.Backup) error 
 }
 
 // Execute provides a mock function with given fields: item, backup
-func (_m *BackupItemAction) Execute(item runtime.Unstructured, backup *v1.Backup) (runtime.Unstructured, []velero.ResourceIdentifier, string, bool, error) {
+func (_m *BackupItemAction) Execute(item runtime.Unstructured, backup *v1.Backup) (runtime.Unstructured, []velero.ResourceIdentifier, string, []velero.ResourceIdentifier, error) {
 	ret := _m.Called(item, backup)
 
 	var r0 runtime.Unstructured
@@ -95,11 +95,13 @@ func (_m *BackupItemAction) Execute(item runtime.Unstructured, backup *v1.Backup
 		r2 = ret.Get(2).(string)
 	}
 
-	var r3 bool
-	if rf, ok := ret.Get(3).(func(runtime.Unstructured, *v1.Backup) bool); ok {
+	var r3 []velero.ResourceIdentifier
+	if rf, ok := ret.Get(3).(func(runtime.Unstructured, *v1.Backup) []velero.ResourceIdentifier); ok {
 		r3 = rf(item, backup)
 	} else {
-		r3 = ret.Get(3).(bool)
+		if ret.Get(3) != nil {
+			r3 = ret.Get(3).([]velero.ResourceIdentifier)
+		}
 	}
 
 	var r4 error

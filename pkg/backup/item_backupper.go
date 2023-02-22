@@ -20,7 +20,6 @@ import (
 	"archive/tar"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -39,6 +38,7 @@ import (
 
 	"github.com/vmware-tanzu/velero/internal/hook"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	"github.com/vmware-tanzu/velero/pkg/archive"
 	"github.com/vmware-tanzu/velero/pkg/client"
 	"github.com/vmware-tanzu/velero/pkg/discovery"
 	"github.com/vmware-tanzu/velero/pkg/features"
@@ -81,7 +81,7 @@ type FileForArchive struct {
 // In addition to the error return, backupItem also returns a bool indicating whether the item
 // was actually backed up and a slice of filepaths and filecontent to replace the data in the original tarball.
 func (ib *itemBackupper) finalizeItem(logger logrus.FieldLogger, obj runtime.Unstructured, groupResource schema.GroupResource, preferredGVR schema.GroupVersionResource) (bool, []FileForArchive, error) {
-	return ib.backupItemInternal(logger, obj, groupResource, preferredGVR, false, true)
+	return ib.backupItemInternal(logger, obj, groupResource, preferredGVR, true, true)
 }
 
 // backupItem backs up an individual item to tarWriter. The item may be excluded based on the
@@ -116,11 +116,13 @@ func (ib *itemBackupper) backupItemInternal(logger logrus.FieldLogger, obj runti
 	namespace := metadata.GetNamespace()
 	name := metadata.GetName()
 
-	log := logger.WithField("name", name)
-	log = log.WithField("resource", groupResource.String())
-	log = log.WithField("namespace", namespace)
+	log := logger.WithFields(map[string]interface{}{
+		"name":      name,
+		"resource":  groupResource.String(),
+		"namespace": namespace,
+	})
 
-	if mustInclude || finalize {
+	if mustInclude {
 		log.Infof("Skipping the exclusion checks for this resource")
 	} else {
 		if metadata.GetLabels()[excludeFromBackupLabel] == "true" {
@@ -163,7 +165,6 @@ func (ib *itemBackupper) backupItemInternal(logger logrus.FieldLogger, obj runti
 		return true, itemFiles, nil
 	}
 	ib.backupRequest.BackedUpItems[key] = struct{}{}
-
 	log.Info("Backing up item")
 
 	var (
@@ -172,58 +173,52 @@ func (ib *itemBackupper) backupItemInternal(logger logrus.FieldLogger, obj runti
 		pvbVolumes []string
 	)
 
-	if !finalize {
-		log.Debug("Executing pre hooks")
-		if err := ib.itemHookHandler.HandleHooks(log, groupResource, obj, ib.backupRequest.ResourceHooks, hook.PhasePre); err != nil {
-			return false, itemFiles, err
-		}
+	log.Debug("Executing pre hooks")
+	if err := ib.itemHookHandler.HandleHooks(log, groupResource, obj, ib.backupRequest.ResourceHooks, hook.PhasePre); err != nil {
+		return false, itemFiles, err
+	}
 
-		if groupResource == kuberesource.Pods {
-			// pod needs to be initialized for the unstructured converter
-			pod = new(corev1api.Pod)
-			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.UnstructuredContent(), pod); err != nil {
-				backupErrs = append(backupErrs, errors.WithStack(err))
-				// nil it on error since it's not valid
-				pod = nil
-			} else {
-				// Get the list of volumes to back up using pod volume backup from the pod's annotations. Remove from this list
-				// any volumes that use a PVC that we've already backed up (this would be in a read-write-many scenario,
-				// where it's been backed up from another pod), since we don't need >1 backup per PVC.
-				for _, volume := range podvolume.GetVolumesByPod(pod, boolptr.IsSetToTrue(ib.backupRequest.Spec.DefaultVolumesToFsBackup)) {
-					// track the volumes that are PVCs using the PVC snapshot tracker, so that when we backup PVCs/PVs
-					// via an item action in the next step, we don't snapshot PVs that will have their data backed up
-					// with pod volume backup.
-					ib.podVolumeSnapshotTracker.Track(pod, volume)
+	if !finalize && groupResource == kuberesource.Pods {
+		// pod needs to be initialized for the unstructured converter
+		pod = new(corev1api.Pod)
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.UnstructuredContent(), pod); err != nil {
+			backupErrs = append(backupErrs, errors.WithStack(err))
+			// nil it on error since it's not valid
+			pod = nil
+		} else {
+			// Get the list of volumes to back up using pod volume backup from the pod's annotations. Remove from this list
+			// any volumes that use a PVC that we've already backed up (this would be in a read-write-many scenario,
+			// where it's been backed up from another pod), since we don't need >1 backup per PVC.
+			for _, volume := range podvolume.GetVolumesByPod(pod, boolptr.IsSetToTrue(ib.backupRequest.Spec.DefaultVolumesToFsBackup)) {
+				// track the volumes that are PVCs using the PVC snapshot tracker, so that when we backup PVCs/PVs
+				// via an item action in the next step, we don't snapshot PVs that will have their data backed up
+				// with pod volume backup.
+				ib.podVolumeSnapshotTracker.Track(pod, volume)
 
-					if found, pvcName := ib.podVolumeSnapshotTracker.TakenForPodVolume(pod, volume); found {
-						log.WithFields(map[string]interface{}{
-							"podVolume": volume,
-							"pvcName":   pvcName,
-						}).Info("Pod volume uses a persistent volume claim which has already been backed up from another pod, skipping.")
-						continue
-					}
-					pvbVolumes = append(pvbVolumes, volume)
+				if found, pvcName := ib.podVolumeSnapshotTracker.TakenForPodVolume(pod, volume); found {
+					log.WithFields(map[string]interface{}{
+						"podVolume": volume,
+						"pvcName":   pvcName,
+					}).Info("Pod volume uses a persistent volume claim which has already been backed up from another pod, skipping.")
+					continue
 				}
+				pvbVolumes = append(pvbVolumes, volume)
 			}
 		}
 	}
 
 	// capture the version of the object before invoking plugin actions as the plugin may update
 	// the group version of the object.
-	// group version of this object
-	// Used on filepath to backup up all groups and versions
-	version := resourceVersion(obj)
+	versionPath := resourceVersion(obj)
 
 	updatedObj, err := ib.executeActions(log, obj, groupResource, name, namespace, metadata, finalize)
 	if err != nil {
 		backupErrs = append(backupErrs, err)
 
 		// if there was an error running actions, execute post hooks and return
-		if !finalize {
-			log.Debug("Executing post hooks")
-			if err := ib.itemHookHandler.HandleHooks(log, groupResource, obj, ib.backupRequest.ResourceHooks, hook.PhasePost); err != nil {
-				backupErrs = append(backupErrs, err)
-			}
+		log.Debug("Executing post hooks")
+		if err := ib.itemHookHandler.HandleHooks(log, groupResource, obj, ib.backupRequest.ResourceHooks, hook.PhasePost); err != nil {
+			backupErrs = append(backupErrs, err)
 		}
 		return false, itemFiles, kubeerrs.NewAggregate(backupErrs)
 	}
@@ -235,60 +230,53 @@ func (ib *itemBackupper) backupItemInternal(logger logrus.FieldLogger, obj runti
 	name = metadata.GetName()
 	namespace = metadata.GetNamespace()
 
-	if !finalize {
-		if groupResource == kuberesource.PersistentVolumes {
-			if err := ib.takePVSnapshot(obj, log); err != nil {
-				backupErrs = append(backupErrs, err)
-			}
-		}
-
-		if groupResource == kuberesource.Pods && pod != nil {
-			// this function will return partial results, so process podVolumeBackups
-			// even if there are errors.
-			podVolumeBackups, errs := ib.backupPodVolumes(log, pod, pvbVolumes)
-
-			ib.backupRequest.PodVolumeBackups = append(ib.backupRequest.PodVolumeBackups, podVolumeBackups...)
-			backupErrs = append(backupErrs, errs...)
-
-			// Mark the volumes that has been processed by pod volume backup as Taken in the tracker.
-			for _, pvb := range podVolumeBackups {
-				ib.podVolumeSnapshotTracker.Take(pod, pvb.Spec.Volume)
-			}
-		}
-
-		log.Debug("Executing post hooks")
-		if err := ib.itemHookHandler.HandleHooks(log, groupResource, obj, ib.backupRequest.ResourceHooks, hook.PhasePost); err != nil {
+	if !finalize && groupResource == kuberesource.PersistentVolumes {
+		if err := ib.takePVSnapshot(obj, log); err != nil {
 			backupErrs = append(backupErrs, err)
 		}
+	}
+
+	if !finalize && groupResource == kuberesource.Pods && pod != nil {
+		// this function will return partial results, so process podVolumeBackups
+		// even if there are errors.
+		podVolumeBackups, errs := ib.backupPodVolumes(log, pod, pvbVolumes)
+
+		ib.backupRequest.PodVolumeBackups = append(ib.backupRequest.PodVolumeBackups, podVolumeBackups...)
+		backupErrs = append(backupErrs, errs...)
+
+		// Mark the volumes that has been processed by pod volume backup as Taken in the tracker.
+		for _, pvb := range podVolumeBackups {
+			ib.podVolumeSnapshotTracker.Take(pod, pvb.Spec.Volume)
+		}
+	}
+
+	log.Debug("Executing post hooks")
+	if err := ib.itemHookHandler.HandleHooks(log, groupResource, obj, ib.backupRequest.ResourceHooks, hook.PhasePost); err != nil {
+		backupErrs = append(backupErrs, err)
 	}
 
 	if len(backupErrs) != 0 {
 		return false, itemFiles, kubeerrs.NewAggregate(backupErrs)
 	}
 
-	// Getting the preferred group version of this resource
-	preferredVersion := preferredGVR.Version
-
-	var filePath string
-
-	// API Group version is now part of path of backup as a subdirectory
-	// it will add a prefix to subdirectory name for the preferred version
-	versionPath := version
-
-	if version == preferredVersion {
-		versionPath = version + velerov1api.PreferredVersionDir
-	}
-
-	if namespace != "" {
-		filePath = filepath.Join(velerov1api.ResourcesDir, groupResource.String(), versionPath, velerov1api.NamespaceScopedDir, namespace, name+".json")
-	} else {
-		filePath = filepath.Join(velerov1api.ResourcesDir, groupResource.String(), versionPath, velerov1api.ClusterScopedDir, name+".json")
-	}
-
 	itemBytes, err := json.Marshal(obj.UnstructuredContent())
 	if err != nil {
 		return false, itemFiles, errors.WithStack(err)
 	}
+
+	if versionPath == preferredGVR.Version {
+		// backing up preferred version backup without API Group version - for backward compatibility
+		log.Debugf("Resource %s/%s, version= %s, preferredVersion=%s", groupResource.String(), name, versionPath, preferredGVR.Version)
+		itemFiles = append(itemFiles, getFileForArchive(namespace, name, groupResource.String(), "", itemBytes))
+		versionPath = versionPath + velerov1api.PreferredVersionDir
+	}
+
+	itemFiles = append(itemFiles, getFileForArchive(namespace, name, groupResource.String(), versionPath, itemBytes))
+	return true, itemFiles, nil
+}
+
+func getFileForArchive(namespace, name, groupResource, versionPath string, itemBytes []byte) FileForArchive {
+	filePath := archive.GetItemFilePath("", groupResource, namespace, name, versionPath)
 	hdr := &tar.Header{
 		Name:     filePath,
 		Size:     int64(len(itemBytes)),
@@ -296,29 +284,7 @@ func (ib *itemBackupper) backupItemInternal(logger logrus.FieldLogger, obj runti
 		Mode:     0755,
 		ModTime:  time.Now(),
 	}
-	itemFiles = append(itemFiles, FileForArchive{FilePath: filePath, Header: hdr, FileBytes: itemBytes})
-
-	// backing up the preferred version backup without API Group version on path -  this is for backward compatibility
-
-	log.Debugf("Resource %s/%s, version= %s, preferredVersion=%s", groupResource.String(), name, version, preferredVersion)
-	if version == preferredVersion {
-		if namespace != "" {
-			filePath = filepath.Join(velerov1api.ResourcesDir, groupResource.String(), velerov1api.NamespaceScopedDir, namespace, name+".json")
-		} else {
-			filePath = filepath.Join(velerov1api.ResourcesDir, groupResource.String(), velerov1api.ClusterScopedDir, name+".json")
-		}
-
-		hdr = &tar.Header{
-			Name:     filePath,
-			Size:     int64(len(itemBytes)),
-			Typeflag: tar.TypeReg,
-			Mode:     0755,
-			ModTime:  time.Now(),
-		}
-		itemFiles = append(itemFiles, FileForArchive{FilePath: filePath, Header: hdr, FileBytes: itemBytes})
-	}
-
-	return true, itemFiles, nil
+	return FileForArchive{FilePath: filePath, Header: hdr, FileBytes: itemBytes}
 }
 
 // backupPodVolumes triggers pod volume backups of the specified pod volumes, and returns a list of PodVolumeBackups
@@ -350,14 +316,26 @@ func (ib *itemBackupper) executeActions(
 		}
 		log.Info("Executing custom action")
 
-		updatedItem, additionalItemIdentifiers, operationID, updateAdditionalItemsAfterOperation, err := action.Execute(obj, ib.backupRequest.Backup)
+		updatedItem, additionalItemIdentifiers, operationID, itemsToUpdate, err := action.Execute(obj, ib.backupRequest.Backup)
 		if err != nil {
 			return nil, errors.Wrapf(err, "error executing custom action (groupResource=%s, namespace=%s, name=%s)", groupResource.String(), namespace, name)
 		}
 
+		u := &unstructured.Unstructured{Object: updatedItem.UnstructuredContent()}
+		mustInclude := u.GetAnnotations()[mustIncludeAdditionalItemAnnotation] == "true"
+		// remove the annotation as it's for communication between BIA and velero server,
+		// we don't want the resource be restored with this annotation.
+		if _, ok := u.GetAnnotations()[mustIncludeAdditionalItemAnnotation]; ok {
+			delete(u.GetAnnotations(), mustIncludeAdditionalItemAnnotation)
+		}
+		obj = u
+		if finalize {
+			continue
+		}
+
 		// If async plugin started async operation, add it to the ItemOperations list
 		// ignore during finalize phase
-		if !finalize && operationID != "" {
+		if operationID != "" {
 			resourceIdentifier := velero.ResourceIdentifier{
 				GroupResource: groupResource,
 				Namespace:     namespace,
@@ -377,52 +355,40 @@ func (ib *itemBackupper) executeActions(
 					Created: &now,
 				},
 			}
-			if updateAdditionalItemsAfterOperation {
-				newOperation.Spec.ItemsToUpdate = additionalItemIdentifiers
-			}
+			newOperation.Spec.ItemsToUpdate = itemsToUpdate
 			itemOperList := ib.backupRequest.GetItemOperationsList()
 			*itemOperList = append(*itemOperList, &newOperation)
 		}
-		u := &unstructured.Unstructured{Object: updatedItem.UnstructuredContent()}
-		mustInclude := u.GetAnnotations()[mustIncludeAdditionalItemAnnotation] == "true"
 
-		if !finalize {
-			for _, additionalItem := range additionalItemIdentifiers {
-				gvr, resource, err := ib.discoveryHelper.ResourceFor(additionalItem.GroupResource.WithVersion(""))
-				if err != nil {
-					return nil, err
-				}
+		for _, additionalItem := range additionalItemIdentifiers {
+			gvr, resource, err := ib.discoveryHelper.ResourceFor(additionalItem.GroupResource.WithVersion(""))
+			if err != nil {
+				return nil, err
+			}
 
-				client, err := ib.dynamicFactory.ClientForGroupVersionResource(gvr.GroupVersion(), resource, additionalItem.Namespace)
-				if err != nil {
-					return nil, err
-				}
+			client, err := ib.dynamicFactory.ClientForGroupVersionResource(gvr.GroupVersion(), resource, additionalItem.Namespace)
+			if err != nil {
+				return nil, err
+			}
 
-				item, err := client.Get(additionalItem.Name, metav1.GetOptions{})
+			item, err := client.Get(additionalItem.Name, metav1.GetOptions{})
 
-				if apierrors.IsNotFound(err) {
-					log.WithFields(logrus.Fields{
-						"groupResource": additionalItem.GroupResource,
-						"namespace":     additionalItem.Namespace,
-						"name":          additionalItem.Name,
-					}).Warnf("Additional item was not found in Kubernetes API, can't back it up")
-					continue
-				}
-				if err != nil {
-					return nil, errors.WithStack(err)
-				}
+			if apierrors.IsNotFound(err) {
+				log.WithFields(logrus.Fields{
+					"groupResource": additionalItem.GroupResource,
+					"namespace":     additionalItem.Namespace,
+					"name":          additionalItem.Name,
+				}).Warnf("Additional item was not found in Kubernetes API, can't back it up")
+				continue
+			}
+			if err != nil {
+				return nil, errors.WithStack(err)
+			}
 
-				if _, err = ib.backupItem(log, item, gvr.GroupResource(), gvr, mustInclude); err != nil {
-					return nil, err
-				}
+			if _, err = ib.backupItem(log, item, gvr.GroupResource(), gvr, mustInclude); err != nil {
+				return nil, err
 			}
 		}
-		// remove the annotation as it's for communication between BIA and velero server,
-		// we don't want the resource be restored with this annotation.
-		if _, ok := u.GetAnnotations()[mustIncludeAdditionalItemAnnotation]; ok {
-			delete(u.GetAnnotations(), mustIncludeAdditionalItemAnnotation)
-		}
-		obj = u
 	}
 	return obj, nil
 }

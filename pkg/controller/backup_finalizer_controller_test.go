@@ -167,14 +167,6 @@ func TestBackupFinalizerReconcile(t *testing.T) {
 			backupStore.On("PutBackupMetadata", mock.Anything, mock.Anything).Return(nil)
 			pluginManager.On("GetBackupItemActionsV2").Return(nil, nil)
 			backupper.On("FinalizeBackup", mock.Anything, mock.Anything, mock.Anything, mock.Anything, framework.BackupItemActionResolverV2{}, mock.Anything).Return(nil)
-			//for _, operation := range test.backupOperations {
-			//	bia.On("Progress", operation.Spec.OperationID, mock.Anything).
-			//		Return(velero.OperationProgress{
-			//		Completed: test.operationComplete,
-			//		Err:       test.operationErr,
-			//	}, nil)
-			//	pluginManager.On("GetBackupItemActionV2", operation.Spec.BackupItemAction).Return(bia, nil)
-			//}
 			_, err := reconciler.Reconcile(context.TODO(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: test.backup.Namespace, Name: test.backup.Name}})
 			gotErr := err != nil
 			assert.Equal(t, test.expectError, gotErr)

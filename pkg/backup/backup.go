@@ -577,6 +577,7 @@ func (kb *kubernetesBackupper) FinalizeBackup(log logrus.FieldLogger,
 		tarWriter:       tw,
 		dynamicFactory:  kb.dynamicFactory,
 		discoveryHelper: kb.discoveryHelper,
+		itemHookHandler: &hook.NoOpItemHookHandler{},
 	}
 	updateFiles := make(map[string]FileForArchive)
 	backedUpGroupResources := map[schema.GroupResource]bool{}

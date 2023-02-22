@@ -112,10 +112,10 @@ func (r *RestartableBackupItemAction) AppliesTo() (velero.ResourceSelector, erro
 }
 
 // Execute restarts the plugin's process if needed, then delegates the call.
-func (r *RestartableBackupItemAction) Execute(item runtime.Unstructured, backup *api.Backup) (runtime.Unstructured, []velero.ResourceIdentifier, string, bool, error) {
+func (r *RestartableBackupItemAction) Execute(item runtime.Unstructured, backup *api.Backup) (runtime.Unstructured, []velero.ResourceIdentifier, string, []velero.ResourceIdentifier, error) {
 	delegate, err := r.getDelegate()
 	if err != nil {
-		return nil, nil, "", false, err
+		return nil, nil, "", nil, err
 	}
 
 	return delegate.Execute(item, backup)
@@ -164,9 +164,9 @@ func (r *AdaptedV1RestartableBackupItemAction) AppliesTo() (velero.ResourceSelec
 }
 
 // Execute delegates to the v1 Execute call, returning an empty operationID.
-func (r *AdaptedV1RestartableBackupItemAction) Execute(item runtime.Unstructured, backup *api.Backup) (runtime.Unstructured, []velero.ResourceIdentifier, string, bool, error) {
+func (r *AdaptedV1RestartableBackupItemAction) Execute(item runtime.Unstructured, backup *api.Backup) (runtime.Unstructured, []velero.ResourceIdentifier, string, []velero.ResourceIdentifier, error) {
 	updatedItem, additionalItems, err := r.V1Restartable.Execute(item, backup)
-	return updatedItem, additionalItems, "", false, err
+	return updatedItem, additionalItems, "", nil, err
 }
 
 // Progress returns with an error since v1 plugins will never return an operationID, which means that

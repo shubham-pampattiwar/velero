@@ -605,7 +605,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 		backupExists             bool
 		existenceCheckError      error
 	}{
-		// Completed
+		// FinalizingAfterPluginOperations
 		{
 			name:                     "backup with no backup location gets the default",
 			backup:                   defaultBackup().Result(),
@@ -633,12 +633,11 @@ func TestProcessBackupCompletions(t *testing.T) {
 					DefaultVolumesToFsBackup: boolptr.True(),
 				},
 				Status: velerov1api.BackupStatus{
-					Phase:               velerov1api.BackupPhaseCompleted,
-					Version:             1,
-					FormatVersion:       "1.1.0",
-					StartTimestamp:      &timestamp,
-					CompletionTimestamp: &timestamp,
-					Expiration:          &timestamp,
+					Phase:          velerov1api.BackupPhaseFinalizingAfterPluginOperations,
+					Version:        1,
+					FormatVersion:  "1.1.0",
+					StartTimestamp: &timestamp,
+					Expiration:     &timestamp,
 				},
 			},
 		},
@@ -669,12 +668,11 @@ func TestProcessBackupCompletions(t *testing.T) {
 					DefaultVolumesToFsBackup: boolptr.False(),
 				},
 				Status: velerov1api.BackupStatus{
-					Phase:               velerov1api.BackupPhaseCompleted,
-					Version:             1,
-					FormatVersion:       "1.1.0",
-					StartTimestamp:      &timestamp,
-					CompletionTimestamp: &timestamp,
-					Expiration:          &timestamp,
+					Phase:          velerov1api.BackupPhaseFinalizingAfterPluginOperations,
+					Version:        1,
+					FormatVersion:  "1.1.0",
+					StartTimestamp: &timestamp,
+					Expiration:     &timestamp,
 				},
 			},
 		},
@@ -708,12 +706,11 @@ func TestProcessBackupCompletions(t *testing.T) {
 					DefaultVolumesToFsBackup: boolptr.True(),
 				},
 				Status: velerov1api.BackupStatus{
-					Phase:               velerov1api.BackupPhaseCompleted,
-					Version:             1,
-					FormatVersion:       "1.1.0",
-					StartTimestamp:      &timestamp,
-					CompletionTimestamp: &timestamp,
-					Expiration:          &timestamp,
+					Phase:          velerov1api.BackupPhaseFinalizingAfterPluginOperations,
+					Version:        1,
+					FormatVersion:  "1.1.0",
+					StartTimestamp: &timestamp,
+					Expiration:     &timestamp,
 				},
 			},
 		},
@@ -745,12 +742,11 @@ func TestProcessBackupCompletions(t *testing.T) {
 					DefaultVolumesToFsBackup: boolptr.False(),
 				},
 				Status: velerov1api.BackupStatus{
-					Phase:               velerov1api.BackupPhaseCompleted,
-					Version:             1,
-					FormatVersion:       "1.1.0",
-					Expiration:          &metav1.Time{now.Add(10 * time.Minute)},
-					StartTimestamp:      &timestamp,
-					CompletionTimestamp: &timestamp,
+					Phase:          velerov1api.BackupPhaseFinalizingAfterPluginOperations,
+					Version:        1,
+					FormatVersion:  "1.1.0",
+					Expiration:     &metav1.Time{now.Add(10 * time.Minute)},
+					StartTimestamp: &timestamp,
 				},
 			},
 		},
@@ -782,12 +778,11 @@ func TestProcessBackupCompletions(t *testing.T) {
 					DefaultVolumesToFsBackup: boolptr.True(),
 				},
 				Status: velerov1api.BackupStatus{
-					Phase:               velerov1api.BackupPhaseCompleted,
-					Version:             1,
-					FormatVersion:       "1.1.0",
-					StartTimestamp:      &timestamp,
-					CompletionTimestamp: &timestamp,
-					Expiration:          &timestamp,
+					Phase:          velerov1api.BackupPhaseFinalizingAfterPluginOperations,
+					Version:        1,
+					FormatVersion:  "1.1.0",
+					StartTimestamp: &timestamp,
+					Expiration:     &timestamp,
 				},
 			},
 		},
@@ -820,12 +815,11 @@ func TestProcessBackupCompletions(t *testing.T) {
 					DefaultVolumesToFsBackup: boolptr.False(),
 				},
 				Status: velerov1api.BackupStatus{
-					Phase:               velerov1api.BackupPhaseCompleted,
-					Version:             1,
-					FormatVersion:       "1.1.0",
-					StartTimestamp:      &timestamp,
-					CompletionTimestamp: &timestamp,
-					Expiration:          &timestamp,
+					Phase:          velerov1api.BackupPhaseFinalizingAfterPluginOperations,
+					Version:        1,
+					FormatVersion:  "1.1.0",
+					StartTimestamp: &timestamp,
+					Expiration:     &timestamp,
 				},
 			},
 		},
@@ -858,12 +852,11 @@ func TestProcessBackupCompletions(t *testing.T) {
 					DefaultVolumesToFsBackup: boolptr.True(),
 				},
 				Status: velerov1api.BackupStatus{
-					Phase:               velerov1api.BackupPhaseCompleted,
-					Version:             1,
-					FormatVersion:       "1.1.0",
-					StartTimestamp:      &timestamp,
-					CompletionTimestamp: &timestamp,
-					Expiration:          &timestamp,
+					Phase:          velerov1api.BackupPhaseFinalizingAfterPluginOperations,
+					Version:        1,
+					FormatVersion:  "1.1.0",
+					StartTimestamp: &timestamp,
+					Expiration:     &timestamp,
 				},
 			},
 		},
@@ -896,12 +889,11 @@ func TestProcessBackupCompletions(t *testing.T) {
 					DefaultVolumesToFsBackup: boolptr.True(),
 				},
 				Status: velerov1api.BackupStatus{
-					Phase:               velerov1api.BackupPhaseCompleted,
-					Version:             1,
-					FormatVersion:       "1.1.0",
-					StartTimestamp:      &timestamp,
-					CompletionTimestamp: &timestamp,
-					Expiration:          &timestamp,
+					Phase:          velerov1api.BackupPhaseFinalizingAfterPluginOperations,
+					Version:        1,
+					FormatVersion:  "1.1.0",
+					StartTimestamp: &timestamp,
+					Expiration:     &timestamp,
 				},
 			},
 		},
@@ -934,12 +926,11 @@ func TestProcessBackupCompletions(t *testing.T) {
 					DefaultVolumesToFsBackup: boolptr.False(),
 				},
 				Status: velerov1api.BackupStatus{
-					Phase:               velerov1api.BackupPhaseCompleted,
-					Version:             1,
-					FormatVersion:       "1.1.0",
-					StartTimestamp:      &timestamp,
-					CompletionTimestamp: &timestamp,
-					Expiration:          &timestamp,
+					Phase:          velerov1api.BackupPhaseFinalizingAfterPluginOperations,
+					Version:        1,
+					FormatVersion:  "1.1.0",
+					StartTimestamp: &timestamp,
+					Expiration:     &timestamp,
 				},
 			},
 		},
@@ -1087,13 +1078,16 @@ func TestProcessBackupCompletions(t *testing.T) {
 
 			// Ensure we have a CompletionTimestamp when uploading and that the backup name matches the backup in the object store.
 			// Failures will display the bytes in buf.
-			hasNameAndCompletionTimestamp := func(info persistence.BackupInfo) bool {
+			hasNameAndCompletionTimestampIfCompleted := func(info persistence.BackupInfo) bool {
 				buf := new(bytes.Buffer)
 				buf.ReadFrom(info.Metadata)
 				return info.Name == test.backup.Name &&
-					strings.Contains(buf.String(), `"completionTimestamp": "2006-01-02T22:04:05Z"`)
+					(!(strings.Contains(buf.String(), `"phase": "Completed"`) ||
+						strings.Contains(buf.String(), `"phase": "Failed"`) ||
+						strings.Contains(buf.String(), `"phase": "PartiallyFailed"`)) ||
+						strings.Contains(buf.String(), `"completionTimestamp": "2006-01-02T22:04:05Z"`))
 			}
-			backupStore.On("PutBackup", mock.MatchedBy(hasNameAndCompletionTimestamp)).Return(nil)
+			backupStore.On("PutBackup", mock.MatchedBy(hasNameAndCompletionTimestampIfCompleted)).Return(nil)
 
 			// add the test's backup to the informer/lister store
 			require.NotNil(t, test.backup)

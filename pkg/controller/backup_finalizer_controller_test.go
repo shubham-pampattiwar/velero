@@ -30,7 +30,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/clock"
+	testclocks "k8s.io/utils/clock/testing"
 	ctrl "sigs.k8s.io/controller-runtime"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -45,7 +45,7 @@ import (
 	velerotest "github.com/vmware-tanzu/velero/pkg/test"
 )
 
-func mockBackupFinalizerReconciler(fakeClient kbclient.Client, fakeClock *clock.FakeClock) (*backupFinalizerReconciler, *fakeBackupper) {
+func mockBackupFinalizerReconciler(fakeClient kbclient.Client, fakeClock *testclocks.FakeClock) (*backupFinalizerReconciler, *fakeBackupper) {
 	backupper := new(fakeBackupper)
 	return NewBackupFinalizerReconciler(
 		fakeClient,
@@ -58,7 +58,7 @@ func mockBackupFinalizerReconciler(fakeClient kbclient.Client, fakeClock *clock.
 	), backupper
 }
 func TestBackupFinalizerReconcile(t *testing.T) {
-	fakeClock := clock.NewFakeClock(time.Now())
+	fakeClock := testclocks.NewFakeClock(time.Now())
 	metav1Now := metav1.NewTime(fakeClock.Now())
 
 	defaultBackupLocation := builder.ForBackupStorageLocation(velerov1api.DefaultNamespace, "default").Result()

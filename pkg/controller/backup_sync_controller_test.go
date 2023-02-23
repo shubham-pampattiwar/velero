@@ -30,10 +30,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/clock"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/validation"
 	core "k8s.io/client-go/testing"
+	testclocks "k8s.io/utils/clock/testing"
 
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlClient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -157,7 +157,7 @@ func numBackups(c ctrlClient.WithWatch, ns string) (int, error) {
 
 var _ = Describe("Backup Sync Reconciler", func() {
 	It("Test Backup Sync Reconciler basic function", func() {
-		fakeClock := clock.NewFakeClock(time.Now())
+		fakeClock := testclocks.NewFakeClock(time.Now())
 		type cloudBackupData struct {
 			backup               *velerov1api.Backup
 			podVolumeBackups     []*velerov1api.PodVolumeBackup

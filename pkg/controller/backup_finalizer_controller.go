@@ -26,7 +26,7 @@ import (
 	"github.com/sirupsen/logrus"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/clock"
+	clocks "k8s.io/utils/clock"
 	ctrl "sigs.k8s.io/controller-runtime"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -42,7 +42,7 @@ import (
 // backupFinalizerReconciler reconciles a Backup object
 type backupFinalizerReconciler struct {
 	client            kbclient.Client
-	clock             clock.Clock
+	clock             clocks.WithTickerAndDelayedExecution
 	backupper         pkgbackup.Backupper
 	newPluginManager  func(logrus.FieldLogger) clientmgmt.Manager
 	metrics           *metrics.ServerMetrics
@@ -53,7 +53,7 @@ type backupFinalizerReconciler struct {
 // NewBackupFinalizerReconciler initializes and returns backupFinalizerReconciler struct.
 func NewBackupFinalizerReconciler(
 	client kbclient.Client,
-	clock clock.Clock,
+	clock clocks.WithTickerAndDelayedExecution,
 	backupper pkgbackup.Backupper,
 	newPluginManager func(logrus.FieldLogger) clientmgmt.Manager,
 	backupStoreGetter persistence.ObjectBackupStoreGetter,

@@ -28,7 +28,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/clock"
+	testclocks "k8s.io/utils/clock/testing"
 	ctrl "sigs.k8s.io/controller-runtime"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -51,7 +51,7 @@ var (
 	bia           = &biav2mocks.BackupItemAction{}
 )
 
-func mockAsyncBackupOperationsReconciler(fakeClient kbclient.Client, fakeClock *clock.FakeClock, freq time.Duration) (*asyncBackupOperationsReconciler, *BackupItemOperationsMap) {
+func mockAsyncBackupOperationsReconciler(fakeClient kbclient.Client, fakeClock *testclocks.FakeClock, freq time.Duration) (*asyncBackupOperationsReconciler, *BackupItemOperationsMap) {
 	abor, biaMap := NewAsyncBackupOperationsReconciler(
 		logrus.StandardLogger(),
 		fakeClient,
@@ -65,7 +65,7 @@ func mockAsyncBackupOperationsReconciler(fakeClient kbclient.Client, fakeClock *
 }
 
 func TestAsyncBackupOperationsReconcile(t *testing.T) {
-	fakeClock := clock.NewFakeClock(time.Now())
+	fakeClock := testclocks.NewFakeClock(time.Now())
 	metav1Now := metav1.NewTime(fakeClock.Now())
 
 	defaultBackupLocation := builder.ForBackupStorageLocation(velerov1api.DefaultNamespace, "default").Result()

@@ -26,12 +26,10 @@ import (
 	"github.com/sirupsen/logrus"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/clock"
+	clocks "k8s.io/utils/clock"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/event"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/itemoperation"
@@ -133,7 +131,7 @@ func (m *BackupItemOperationsMap) UpdateForBackup(backupStore persistence.Backup
 type asyncBackupOperationsReconciler struct {
 	client.Client
 	logger            logrus.FieldLogger
-	clock             clock.Clock
+	clock             clocks.WithTickerAndDelayedExecution
 	frequency         time.Duration
 	itemOperationsMap *BackupItemOperationsMap
 	newPluginManager  func(logger logrus.FieldLogger) clientmgmt.Manager
@@ -152,7 +150,7 @@ func NewAsyncBackupOperationsReconciler(
 	abor := &asyncBackupOperationsReconciler{
 		Client:            client,
 		logger:            logger,
-		clock:             clock.RealClock{},
+		clock:             clocks.RealClock{},
 		frequency:         frequency,
 		itemOperationsMap: &BackupItemOperationsMap{operations: make(map[string]*operationsForBackup)},
 		newPluginManager:  newPluginManager,
@@ -168,17 +166,7 @@ func NewAsyncBackupOperationsReconciler(
 func (c *asyncBackupOperationsReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	s := kube.NewPeriodicalEnqueueSource(c.logger, mgr.GetClient(), &velerov1api.BackupList{}, c.frequency, kube.PeriodicalEnqueueSourceOption{})
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&velerov1api.Backup{}, builder.WithPredicates(predicate.Funcs{
-			UpdateFunc: func(ue event.UpdateEvent) bool {
-				return false
-			},
-			DeleteFunc: func(de event.DeleteEvent) bool {
-				return false
-			},
-			GenericFunc: func(ge event.GenericEvent) bool {
-				return false
-			},
-		})).
+		For(&velerov1api.Backup{}, builder.WithPredicates(kube.FalsePredicate{})).
 		Watches(s, nil).
 		Complete(c)
 }
@@ -442,6 +430,10 @@ func getBackupItemOperationProgress(
 			}
 			if operation.Status.OperationUnits != operationProgress.OperationUnits {
 				operation.Status.OperationUnits = operationProgress.OperationUnits
+				changes = true
+			}
+			if operation.Status.Description != operationProgress.Description {
+				operation.Status.Description = operationProgress.Description
 				changes = true
 			}
 			started := metav1.NewTime(operationProgress.Started)

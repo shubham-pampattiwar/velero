@@ -766,18 +766,14 @@ func (c *backupController) runBackup(backup *pkgbackup.Request) error {
 	case logCounter.GetCount(logrus.ErrorLevel) > 0:
 		if inProgressOperations {
 			backup.Status.Phase = velerov1api.BackupPhaseWaitingForPluginOperationsPartiallyFailed
-		} else if backup.Status.AsyncBackupItemOperationsAttempted > 0 {
-			backup.Status.Phase = velerov1api.BackupPhaseFinalizingAfterPluginOperationsPartiallyFailed
 		} else {
-			backup.Status.Phase = velerov1api.BackupPhasePartiallyFailed
+			backup.Status.Phase = velerov1api.BackupPhaseFinalizingAfterPluginOperationsPartiallyFailed
 		}
 	default:
 		if inProgressOperations {
 			backup.Status.Phase = velerov1api.BackupPhaseWaitingForPluginOperations
-		} else if backup.Status.AsyncBackupItemOperationsAttempted > 0 {
-			backup.Status.Phase = velerov1api.BackupPhaseFinalizingAfterPluginOperations
 		} else {
-			backup.Status.Phase = velerov1api.BackupPhaseCompleted
+			backup.Status.Phase = velerov1api.BackupPhaseFinalizingAfterPluginOperations
 		}
 	}
 	// Mark completion timestamp before serializing and uploading.

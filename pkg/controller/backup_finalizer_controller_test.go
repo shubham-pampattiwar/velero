@@ -91,7 +91,7 @@ func TestBackupFinalizerReconcile(t *testing.T) {
 							Namespace:     "ns-1",
 							Name:          "pod-1",
 						},
-						ItemsToUpdate: []velero.ResourceIdentifier{
+						PostOperationItems: []velero.ResourceIdentifier{
 							{
 								GroupResource: kuberesource.Secrets,
 								Namespace:     "ns-1",
@@ -127,7 +127,7 @@ func TestBackupFinalizerReconcile(t *testing.T) {
 							Namespace:     "ns-2",
 							Name:          "pod-2",
 						},
-						ItemsToUpdate: []velero.ResourceIdentifier{
+						PostOperationItems: []velero.ResourceIdentifier{
 							{
 								GroupResource: kuberesource.Secrets,
 								Namespace:     "ns-2",

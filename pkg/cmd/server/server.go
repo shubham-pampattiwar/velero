@@ -67,6 +67,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/features"
 	clientset "github.com/vmware-tanzu/velero/pkg/generated/clientset/versioned"
 	informers "github.com/vmware-tanzu/velero/pkg/generated/informers/externalversions"
+	"github.com/vmware-tanzu/velero/pkg/itemoperationmap"
 	"github.com/vmware-tanzu/velero/pkg/metrics"
 	"github.com/vmware-tanzu/velero/pkg/nodeagent"
 	"github.com/vmware-tanzu/velero/pkg/persistence"
@@ -225,7 +226,7 @@ func NewCommand(f client.Factory) *cobra.Command {
 	command.Flags().DurationVar(&config.defaultBackupTTL, "default-backup-ttl", config.defaultBackupTTL, "How long to wait by default before backups can be garbage collected.")
 	command.Flags().DurationVar(&config.repoMaintenanceFrequency, "default-repo-maintain-frequency", config.repoMaintenanceFrequency, "How often 'maintain' is run for backup repositories by default.")
 	command.Flags().DurationVar(&config.garbageCollectionFrequency, "garbage-collection-frequency", config.garbageCollectionFrequency, "How often garbage collection is run for expired backups.")
-	command.Flags().DurationVar(&config.itemOperationSyncFrequency, "item-operation-sync-frequency", config.itemOperationSyncFrequency, "How often to check status on async backup/restore operations after backup processing.")
+	command.Flags().DurationVar(&config.itemOperationSyncFrequency, "item-operation-sync-frequency", config.itemOperationSyncFrequency, "How often to check status on backup/restore operations after backup/restore processing.")
 	command.Flags().BoolVar(&config.defaultVolumesToFsBackup, "default-volumes-to-fs-backup", config.defaultVolumesToFsBackup, "Backup all volumes with pod volume file system backup by default.")
 	command.Flags().StringVar(&config.uploaderType, "uploader-type", config.uploaderType, "Type of uploader to handle the transfer of data of pod volumes")
 	command.Flags().DurationVar(&config.defaultItemOperationTimeout, "default-item-operation-timeout", config.defaultItemOperationTimeout, "How long to wait on asynchronous BackupItemActions and RestoreItemActions to complete before timing out.")
@@ -681,16 +682,16 @@ func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string
 	}
 	// Note: all runtime type controllers that can be disabled are grouped separately, below:
 	enabledRuntimeControllers := map[string]struct{}{
-		controller.ServerStatusRequest:   {},
-		controller.DownloadRequest:       {},
-		controller.Schedule:              {},
-		controller.BackupRepo:            {},
-		controller.BackupDeletion:        {},
-		controller.BackupFinalizer:       {},
-		controller.GarbageCollection:     {},
-		controller.BackupSync:            {},
-		controller.AsyncBackupOperations: {},
-		controller.Restore:               {},
+		controller.ServerStatusRequest: {},
+		controller.DownloadRequest:     {},
+		controller.Schedule:            {},
+		controller.BackupRepo:          {},
+		controller.BackupDeletion:      {},
+		controller.BackupFinalizer:     {},
+		controller.GarbageCollection:   {},
+		controller.BackupSync:          {},
+		controller.BackupOperations:    {},
+		controller.Restore:             {},
 	}
 
 	if s.config.restoreOnly {
@@ -701,7 +702,7 @@ func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string
 			controller.GarbageCollection,
 			controller.BackupDeletion,
 			controller.BackupFinalizer,
-			controller.AsyncBackupOperations,
+			controller.BackupOperations,
 		)
 	}
 
@@ -796,20 +797,20 @@ func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string
 		}
 	}
 
-	var backupOpsMap *controller.BackupItemOperationsMap
-	if _, ok := enabledRuntimeControllers[controller.AsyncBackupOperations]; ok {
-		r, m := controller.NewAsyncBackupOperationsReconciler(
+	backupOpsMap := itemoperationmap.NewBackupItemOperationsMap()
+	if _, ok := enabledRuntimeControllers[controller.BackupOperations]; ok {
+		r := controller.NewBackupOperationsReconciler(
 			s.logger,
 			s.mgr.GetClient(),
 			s.config.itemOperationSyncFrequency,
 			newPluginManager,
 			backupStoreGetter,
 			s.metrics,
+			backupOpsMap,
 		)
 		if err := r.SetupWithManager(s.mgr); err != nil {
-			s.logger.Fatal(err, "unable to create controller", "controller", controller.AsyncBackupOperations)
+			s.logger.Fatal(err, "unable to create controller", "controller", controller.BackupOperations)
 		}
-		backupOpsMap = m
 	}
 
 	if _, ok := enabledRuntimeControllers[controller.BackupFinalizer]; ok {

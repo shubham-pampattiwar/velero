@@ -89,7 +89,7 @@ func TestRemoveControllers(t *testing.T) {
 		{
 			name: "Remove all disable controllers",
 			disabledControllers: []string{
-				controller.AsyncBackupOperations,
+				controller.BackupOperations,
 				controller.Backup,
 				controller.BackupDeletion,
 				controller.BackupSync,
@@ -128,12 +128,12 @@ func TestRemoveControllers(t *testing.T) {
 			}
 
 			enabledRuntimeControllers := map[string]struct{}{
-				controller.ServerStatusRequest:   {},
-				controller.Schedule:              {},
-				controller.BackupDeletion:        {},
-				controller.BackupRepo:            {},
-				controller.DownloadRequest:       {},
-				controller.AsyncBackupOperations: {},
+				controller.ServerStatusRequest: {},
+				controller.Schedule:            {},
+				controller.BackupDeletion:      {},
+				controller.BackupRepo:          {},
+				controller.DownloadRequest:     {},
+				controller.BackupOperations:    {},
 			}
 
 			totalNumOriginalControllers := len(enabledControllers) + len(enabledRuntimeControllers)

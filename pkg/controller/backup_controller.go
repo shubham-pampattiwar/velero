@@ -684,9 +684,9 @@ func (b *backupReconciler) runBackup(backup *pkgbackup.Request) error {
 		}
 
 		// Delete the VolumeSnapshots created in the backup, when CSI feature is enabled.
-		if len(volumeSnapshots) > 0 && len(volumeSnapshotContents) > 0 {
-			b.deleteVolumeSnapshot(volumeSnapshots, volumeSnapshotContents, backupLog)
-		}
+		//if len(volumeSnapshots) > 0 && len(volumeSnapshotContents) > 0 {
+		//	b.deleteVolumeSnapshot(volumeSnapshots, volumeSnapshotContents, backupLog)
+		//}
 	}
 
 	backup.Status.VolumeSnapshotsAttempted = len(backup.VolumeSnapshots)

@@ -22,6 +22,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/vmware-tanzu/velero/pkg/datamover"
+
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v4/apis/volumesnapshot/v1"
 	snapshotterClientSet "github.com/kubernetes-csi/external-snapshotter/client/v4/clientset/versioned"
 	snapshotv1listers "github.com/kubernetes-csi/external-snapshotter/client/v4/listers/volumesnapshot/v1"
@@ -246,6 +248,11 @@ func (r *backupFinalizerReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		// Delete the VolumeSnapshots created in the backup, when CSI feature is enabled.
 		if len(volumeSnapshots) > 0 && len(volumeSnapshotContents) > 0 {
 			deleteVolumeSnapshots(volumeSnapshots, volumeSnapshotContents, log, 30, r.client, r.volumeSnapshotClient, r.resourceTimeout)
+		}
+		// check if the VSBs associated with the backup are in completed state, if yes then clean them up
+		err = datamover.DeleteVSBsIfComplete(backup.Name, r.log)
+		if err != nil {
+			log.Error(err)
 		}
 	}
 

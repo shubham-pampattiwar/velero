@@ -2587,7 +2587,7 @@ func TestBackupWithInvalidHooks(t *testing.T) {
 					builder.ForPod("foo", "bar").Result(),
 				),
 			},
-			want: errors.New("\"nonexistent-operator\" is not a valid pod selector operator"),
+			want: errors.New("\"nonexistent-operator\" is not a valid label selector operator"),
 		},
 	}
 

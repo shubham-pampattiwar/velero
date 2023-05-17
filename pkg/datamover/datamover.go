@@ -18,8 +18,10 @@ import (
 )
 
 const (
-	ReconciledReasonError = "Error"
-	ConditionReconciled   = "Reconciled"
+	ReconciledReasonError               = "Error"
+	ConditionReconciled                 = "Reconciled"
+	SnapMoverBackupPhaseFailed          = "Failed"
+	SnapMoverBackupPhasePartiallyFailed = "PartiallyFailed"
 )
 
 func GetVolumeSnapMoverClient() (kbclient.Client, error) {
@@ -99,7 +101,7 @@ func CheckIfVolumeSnapshotBackupsAreComplete(ctx context.Context, volumesnapshot
 				}
 				// check for a failed VSB
 				for _, cond := range currentVSB.Status.Conditions {
-					if cond.Status == metav1.ConditionFalse && cond.Reason == ReconciledReasonError && cond.Type == ConditionReconciled {
+					if cond.Status == metav1.ConditionFalse && cond.Reason == ReconciledReasonError && cond.Type == ConditionReconciled && (currentVSB.Status.Phase == SnapMoverBackupPhaseFailed || currentVSB.Status.Phase == SnapMoverBackupPhasePartiallyFailed) {
 						return false, errors.Errorf("volumesnapshotbackup %s has failed status", currentVSB.Name)
 					}
 				}

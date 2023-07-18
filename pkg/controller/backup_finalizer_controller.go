@@ -250,7 +250,8 @@ func (r *backupFinalizerReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			deleteVolumeSnapshots(volumeSnapshots, volumeSnapshotContents, log, 30, r.client, r.volumeSnapshotClient, r.resourceTimeout)
 		}
 		// check if the VSBs associated with the backup are in completed state, if yes then clean them up
-		err = datamover.DeleteVSBsIfComplete(backup.Name, r.log)
+		// Also cleanup the datamover VSCs
+		err = datamover.CleanupDatamoverArtifacts(backup.Name, r.log, *vscList, r.volumeSnapshotClient)
 		if err != nil {
 			log.Error(err)
 		}

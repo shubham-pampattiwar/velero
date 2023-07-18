@@ -3,6 +3,8 @@ package datamover
 import (
 	"context"
 	"fmt"
+	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v4/apis/volumesnapshot/v1"
+	snapshotterClientSet "github.com/kubernetes-csi/external-snapshotter/client/v4/clientset/versioned"
 	"time"
 
 	snapmoverv1alpha1 "github.com/konveyor/volume-snapshot-mover/api/v1alpha1"
@@ -37,7 +39,7 @@ func GetVolumeSnapMoverClient() (kbclient.Client, error) {
 	return client, err
 }
 
-func DeleteVSBsIfComplete(backupName string, log logrus.FieldLogger) error {
+func CleanupDatamoverArtifacts(backupName string, log logrus.FieldLogger, vscList snapshotv1api.VolumeSnapshotContentList, volumeSnapshotClient snapshotterClientSet.Interface) error {
 	volumeSnapMoverClient, err := GetVolumeSnapMoverClient()
 	if err != nil {
 		log.Errorf(err.Error())
@@ -55,6 +57,7 @@ func DeleteVSBsIfComplete(backupName string, log logrus.FieldLogger) error {
 		return err
 	}
 
+	// clean up VSBs as well as VSCs, VSB existence implies that the VSCs are from datamover workflow
 	if len(VSBList.Items) > 0 {
 		err = CheckIfVolumeSnapshotBackupsAreComplete(context.Background(), VSBList, log)
 		if err != nil {
@@ -69,6 +72,15 @@ func DeleteVSBsIfComplete(backupName string, log logrus.FieldLogger) error {
 			if err != nil {
 				log.Warnf("failed to delete completed VolumeSnapshotBackup: %s", err.Error())
 				return err
+			}
+		}
+
+		// Delete the VSCs
+		for _, vsc := range vscList.Items {
+			log.Infof("Cleaning up datamover VSC: %s", vsc.Name)
+			err := volumeSnapshotClient.SnapshotV1().VolumeSnapshotContents().Delete(context.TODO(), vsc.Name, metav1.DeleteOptions{})
+			if err != nil {
+				log.Errorf("fail to delete VolumeSnapshotContent %s: %s", vsc.Namespace, err.Error())
 			}
 		}
 	}

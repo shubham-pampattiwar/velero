@@ -1036,7 +1036,7 @@ func deleteVolumeSnapshots(volumeSnapshots []snapshotv1api.VolumeSnapshot,
 // instance.
 func deleteVolumeSnapshot(vs snapshotv1api.VolumeSnapshot, vscMap map[string]snapshotv1api.VolumeSnapshotContent, logger logrus.FieldLogger, kbClient kbclient.Client, volumeSnapshotClient snapshotterClientSet.Interface, resourceTimeout time.Duration) {
 	var vsc snapshotv1api.VolumeSnapshotContent
-	modifyVSCFlag := false
+	//modifyVSCFlag := false
 	if vs.Status != nil &&
 		vs.Status.BoundVolumeSnapshotContentName != nil &&
 		len(*vs.Status.BoundVolumeSnapshotContentName) > 0 {
@@ -1045,10 +1045,10 @@ func deleteVolumeSnapshot(vs snapshotv1api.VolumeSnapshot, vscMap map[string]sna
 			logger.Errorf("Not find %s from the vscMap", *vs.Status.BoundVolumeSnapshotContentName)
 			return
 		}
-
-		if vsc.Spec.DeletionPolicy == snapshotv1api.VolumeSnapshotContentDelete {
-			modifyVSCFlag = true
-		}
+	
+		//if vsc.Spec.DeletionPolicy == snapshotv1api.VolumeSnapshotContentDelete {
+		//	modifyVSCFlag = true
+		//}
 	} else {
 		logger.Errorf("VolumeSnapshot %s/%s is not ready. This is not expected.", vs.Namespace, vs.Name)
 	}
@@ -1057,29 +1057,36 @@ func deleteVolumeSnapshot(vs snapshotv1api.VolumeSnapshot, vscMap map[string]sna
 	// because VolumeSnapshotContent will be deleted by deleting VolumeSnapshot, when
 	// DeletionPolicy is set to Delete, but Velero needs VSC for cleaning snapshot on cloud
 	// in backup deletion.
-	if modifyVSCFlag {
-		logger.Debugf("Patching VolumeSnapshotContent %s", vsc.Name)
-		original := vsc.DeepCopy()
-		vsc.Spec.DeletionPolicy = snapshotv1api.VolumeSnapshotContentRetain
-		if err := kbClient.Patch(context.Background(), &vsc, kbclient.MergeFrom(original)); err != nil {
-			logger.Errorf("fail to modify VolumeSnapshotContent %s DeletionPolicy to Retain: %s", vsc.Name, err.Error())
-			return
-		}
-
-		defer func() {
-			logger.Debugf("Start to recreate VolumeSnapshotContent %s", vsc.Name)
-			err := recreateVolumeSnapshotContent(vsc, resourceTimeout, kbClient)
-			if err != nil {
-				logger.Errorf("fail to recreate VolumeSnapshotContent %s: %s", vsc.Name, err.Error())
-			}
-		}()
-	}
+	//if modifyVSCFlag {
+	//	logger.Debugf("Patching VolumeSnapshotContent %s", vsc.Name)
+	//	original := vsc.DeepCopy()
+	//	vsc.Spec.DeletionPolicy = snapshotv1api.VolumeSnapshotContentRetain
+	//	if err := kbClient.Patch(context.Background(), &vsc, kbclient.MergeFrom(original)); err != nil {
+	//		logger.Errorf("fail to modify VolumeSnapshotContent %s DeletionPolicy to Retain: %s", vsc.Name, err.Error())
+	//		return
+	//	}
+	//
+	//	defer func() {
+	//		logger.Debugf("Start to recreate VolumeSnapshotContent %s", vsc.Name)
+	//		err := recreateVolumeSnapshotContent(vsc, resourceTimeout, kbClient)
+	//		if err != nil {
+	//			logger.Errorf("fail to recreate VolumeSnapshotContent %s: %s", vsc.Name, err.Error())
+	//		}
+	//	}()
+	//}
 
 	// Delete VolumeSnapshot from cluster
 	logger.Debugf("Deleting VolumeSnapshot %s/%s", vs.Namespace, vs.Name)
 	err := volumeSnapshotClient.SnapshotV1().VolumeSnapshots(vs.Namespace).Delete(context.TODO(), vs.Name, metav1.DeleteOptions{})
 	if err != nil {
 		logger.Errorf("fail to delete VolumeSnapshot %s/%s: %s", vs.Namespace, vs.Name, err.Error())
+	}
+
+	// Delete VSC from Cluster
+	logger.Infof("Deleting VSC %s", vsc.Name)
+	err = volumeSnapshotClient.SnapshotV1().VolumeSnapshotContents().Delete(context.TODO(), vsc.Name, metav1.DeleteOptions{})
+	if err != nil {
+		logger.Errorf("fail to delete VolumeSnapshotContent %s: %s", vsc.Namespace, err.Error())
 	}
 }
 

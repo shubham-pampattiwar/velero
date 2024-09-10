@@ -5,7 +5,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    http://www.apache.org/licenses/LICENSE-2.0
+http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -58,7 +58,7 @@ func TestGetSnapshotCommand(t *testing.T) {
 	assert.Equal(t, "password-file", c.PasswordFile)
 
 	// set up expected flag names
-	expectedFlags := []string{"--json", "--last", "--tag"}
+	expectedFlags := []string{"--json", "--latest=1", "--tag"}
 	// for tracking actual flag names
 	actualFlags := []string{}
 	// for tracking actual --tag values as a map
@@ -68,10 +68,11 @@ func TestGetSnapshotCommand(t *testing.T) {
 	for _, flag := range c.ExtraFlags {
 		// split into 2 parts from the first = sign (if any)
 		parts := strings.SplitN(flag, "=", 2)
-		// parts[0] is the flag name
-		actualFlags = append(actualFlags, parts[0])
+
 		// convert --tag data to a map
 		if parts[0] == "--tag" {
+			actualFlags = append(actualFlags, parts[0])
+
 			// split based on ,
 			tags := strings.Split(parts[1], ",")
 			// loop through each key-value tag pair
@@ -81,12 +82,13 @@ func TestGetSnapshotCommand(t *testing.T) {
 				// record actual key & value
 				actualTags[kvs[0]] = kvs[1]
 			}
+		} else {
+			actualFlags = append(actualFlags, flag)
 		}
 	}
 
 	assert.Equal(t, expectedFlags, actualFlags)
 	assert.Equal(t, expectedTags, actualTags)
-
 }
 
 func TestInitCommand(t *testing.T) {

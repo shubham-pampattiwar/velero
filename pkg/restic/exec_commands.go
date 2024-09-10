@@ -1,5 +1,5 @@
 /*
-Copyright the Velero contributors.
+Copyright The Velero Contributors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,12 +20,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	"github.com/vmware-tanzu/velero/pkg/uploader"
 	"github.com/vmware-tanzu/velero/pkg/util/exec"
 	"github.com/vmware-tanzu/velero/pkg/util/filesystem"
 )
@@ -46,8 +47,8 @@ type backupStatusLine struct {
 
 // GetSnapshotID runs provided 'restic snapshots' command to get the ID of a snapshot
 // and an error if a unique snapshot cannot be identified.
-func GetSnapshotID(snapshotIdCmd *Command) (string, error) {
-	stdout, stderr, err := exec.RunCommand(snapshotIdCmd.Cmd())
+func GetSnapshotID(snapshotIDCmd *Command) (string, error) {
+	stdout, stderr, err := exec.RunCommand(snapshotIDCmd.Cmd())
 	if err != nil {
 		return "", errors.Wrapf(err, "error running command, stderr=%s", stderr)
 	}
@@ -58,11 +59,11 @@ func GetSnapshotID(snapshotIdCmd *Command) (string, error) {
 
 	var snapshots []snapshotID
 	if err := json.Unmarshal([]byte(stdout), &snapshots); err != nil {
-		return "", errors.Wrap(err, "error unmarshalling restic snapshots result")
+		return "", errors.Wrap(err, "error unmarshaling restic snapshots result")
 	}
 
 	if len(snapshots) != 1 {
-		return "", errors.Errorf("expected one matching snapshot, got %d", len(snapshots))
+		return "", errors.Errorf("expected one matching snapshot by command: %s, got %d", snapshotIDCmd.String(), len(snapshots))
 	}
 
 	return snapshots[0].ShortID, nil
@@ -70,7 +71,7 @@ func GetSnapshotID(snapshotIdCmd *Command) (string, error) {
 
 // RunBackup runs a `restic backup` command and watches the output to provide
 // progress updates to the caller.
-func RunBackup(backupCmd *Command, log logrus.FieldLogger, updateFunc func(velerov1api.PodVolumeOperationProgress)) (string, string, error) {
+func RunBackup(backupCmd *Command, log logrus.FieldLogger, updater uploader.ProgressUpdater) (string, string, error) {
 	// buffers for copying command stdout/err output into
 	stdoutBuf := new(bytes.Buffer)
 	stderrBuf := new(bytes.Buffer)
@@ -85,6 +86,7 @@ func RunBackup(backupCmd *Command, log logrus.FieldLogger, updateFunc func(veler
 
 	err := cmd.Start()
 	if err != nil {
+		exec.LogErrorAsExitCode(err, log)
 		return stdoutBuf.String(), stderrBuf.String(), err
 	}
 
@@ -103,7 +105,7 @@ func RunBackup(backupCmd *Command, log logrus.FieldLogger, updateFunc func(veler
 					// if the line contains a non-empty bytes_done field, we can update the
 					// caller with the progress
 					if stat.BytesDone != 0 {
-						updateFunc(velerov1api.PodVolumeOperationProgress{
+						updater.UpdateProgress(&uploader.Progress{
 							TotalBytes: stat.TotalBytes,
 							BytesDone:  stat.BytesDone,
 						})
@@ -118,6 +120,7 @@ func RunBackup(backupCmd *Command, log logrus.FieldLogger, updateFunc func(veler
 
 	err = cmd.Wait()
 	if err != nil {
+		exec.LogErrorAsExitCode(err, log)
 		return stdoutBuf.String(), stderrBuf.String(), err
 	}
 	quit <- struct{}{}
@@ -135,7 +138,7 @@ func RunBackup(backupCmd *Command, log logrus.FieldLogger, updateFunc func(veler
 	}
 
 	// update progress to 100%
-	updateFunc(velerov1api.PodVolumeOperationProgress{
+	updater.UpdateProgress(&uploader.Progress{
 		TotalBytes: stat.TotalBytesProcessed,
 		BytesDone:  stat.TotalBytesProcessed,
 	})
@@ -155,7 +158,7 @@ func decodeBackupStatusLine(lastLine []byte) (backupStatusLine, error) {
 // have a newline at the end of it, so this returns the substring between the
 // last two newlines.
 func getLastLine(b []byte) []byte {
-	if b == nil || len(b) == 0 {
+	if len(b) == 0 {
 		return []byte("")
 	}
 	// subslice the byte array to ignore the newline at the end of the string
@@ -183,13 +186,21 @@ func getSummaryLine(b []byte) ([]byte, error) {
 
 // RunRestore runs a `restic restore` command and monitors the volume size to
 // provide progress updates to the caller.
-func RunRestore(restoreCmd *Command, log logrus.FieldLogger, updateFunc func(velerov1api.PodVolumeOperationProgress)) (string, string, error) {
-	snapshotSize, err := getSnapshotSize(restoreCmd.RepoIdentifier, restoreCmd.PasswordFile, restoreCmd.CACertFile, restoreCmd.Args[0], restoreCmd.Env)
+func RunRestore(restoreCmd *Command, log logrus.FieldLogger, updater uploader.ProgressUpdater) (string, string, error) {
+	insecureTLSFlag := ""
+
+	for _, extraFlag := range restoreCmd.ExtraFlags {
+		if strings.Contains(extraFlag, resticInsecureTLSFlag) {
+			insecureTLSFlag = extraFlag
+		}
+	}
+
+	snapshotSize, err := getSnapshotSize(restoreCmd.RepoIdentifier, restoreCmd.PasswordFile, restoreCmd.CACertFile, restoreCmd.Args[0], restoreCmd.Env, insecureTLSFlag)
 	if err != nil {
 		return "", "", errors.Wrap(err, "error getting snapshot size")
 	}
 
-	updateFunc(velerov1api.PodVolumeOperationProgress{
+	updater.UpdateProgress(&uploader.Progress{
 		TotalBytes: snapshotSize,
 	})
 
@@ -207,10 +218,12 @@ func RunRestore(restoreCmd *Command, log logrus.FieldLogger, updateFunc func(vel
 					log.WithError(err).Errorf("error getting restic restore progress")
 				}
 
-				updateFunc(velerov1api.PodVolumeOperationProgress{
-					TotalBytes: snapshotSize,
-					BytesDone:  volumeSize,
-				})
+				if volumeSize != 0 {
+					updater.UpdateProgress(&uploader.Progress{
+						TotalBytes: snapshotSize,
+						BytesDone:  volumeSize,
+					})
+				}
 			case <-quit:
 				ticker.Stop()
 				return
@@ -218,11 +231,11 @@ func RunRestore(restoreCmd *Command, log logrus.FieldLogger, updateFunc func(vel
 		}
 	}()
 
-	stdout, stderr, err := exec.RunCommand(restoreCmd.Cmd())
+	stdout, stderr, err := exec.RunCommandWithLog(restoreCmd.Cmd(), log)
 	quit <- struct{}{}
 
 	// update progress to 100%
-	updateFunc(velerov1api.PodVolumeOperationProgress{
+	updater.UpdateProgress(&uploader.Progress{
 		TotalBytes: snapshotSize,
 		BytesDone:  snapshotSize,
 	})
@@ -230,10 +243,14 @@ func RunRestore(restoreCmd *Command, log logrus.FieldLogger, updateFunc func(vel
 	return stdout, stderr, err
 }
 
-func getSnapshotSize(repoIdentifier, passwordFile, caCertFile, snapshotID string, env []string) (int64, error) {
+func getSnapshotSize(repoIdentifier, passwordFile, caCertFile, snapshotID string, env []string, insecureTLS string) (int64, error) {
 	cmd := StatsCommand(repoIdentifier, passwordFile, snapshotID)
 	cmd.Env = env
 	cmd.CACertFile = caCertFile
+
+	if len(insecureTLS) > 0 {
+		cmd.ExtraFlags = append(cmd.ExtraFlags, insecureTLS)
+	}
 
 	stdout, stderr, err := exec.RunCommand(cmd.Cmd())
 	if err != nil {
@@ -245,7 +262,7 @@ func getSnapshotSize(repoIdentifier, passwordFile, caCertFile, snapshotID string
 	}
 
 	if err := json.Unmarshal([]byte(stdout), &snapshotStats); err != nil {
-		return 0, errors.Wrap(err, "error unmarshalling restic stats result")
+		return 0, errors.Wrapf(err, "error unmarshaling restic stats result, stdout=%s", stdout)
 	}
 
 	return snapshotStats.TotalSize, nil

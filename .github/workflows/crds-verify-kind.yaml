@@ -12,14 +12,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Set up Go
-        uses: actions/setup-go@v2
+        uses: actions/setup-go@v5
         with:
-          go-version: 1.16
+          go-version: '1.22'
         id: go
       # Look for a CLI that's made for this PR
       - name: Fetch built CLI
         id: cache
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         env:
           cache-name: cache-velero-cli
         with:
@@ -31,7 +31,7 @@ jobs:
             velero-${{ github.event.pull_request.number }}-
 
       - name: Fetch cached go modules
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         if: steps.cache.outputs.cache-hit != 'true'
         with:
           path: ~/go/pkg/mod
@@ -40,7 +40,7 @@ jobs:
             ${{ runner.os }}-go-
 
       - name: Check out the code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         if: steps.cache.outputs.cache-hit != 'true'
 
       # If no binaries were built for this PR, build it now.
@@ -49,7 +49,7 @@ jobs:
         run: |
           make local
 
-  # Check the common CLI against all kubernetes versions
+  # Check the common CLI against all Kubernetes versions
   crd-check:
     needs: build-cli
     runs-on: ubuntu-latest
@@ -57,20 +57,19 @@ jobs:
       matrix:
         # Latest k8s versions. There's no series-based tag, nor is there a latest tag.
         k8s:
-          - 1.15.12
-          - 1.16.15
-          - 1.17.17
-          - 1.18.15
-          - 1.19.7
-          - 1.20.2
-          - 1.21.1
-          - 1.22.0
+          - 1.23.17
+          - 1.24.17
+          - 1.25.16
+          - 1.26.13
+          - 1.27.10
+          - 1.28.6
+          - 1.29.1
     # All steps run in parallel unless otherwise specified.
     # See https://docs.github.com/en/actions/learn-github-actions/managing-complex-workflows#creating-dependent-jobs
     steps:
       - name: Fetch built CLI
         id: cache
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         env:
           cache-name: cache-velero-cli
         with:
@@ -82,7 +81,7 @@ jobs:
             velero-${{ github.event.pull_request.number }}-
       - uses: engineerd/setup-kind@v0.5.0
         with:
-          version: "v0.11.1"
+          version: "v0.21.0"
           image: "kindest/node:v${{ matrix.k8s }}"
       - name: Install CRDs
         run: |

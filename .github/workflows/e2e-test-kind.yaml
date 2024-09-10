@@ -12,27 +12,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Set up Go
-        uses: actions/setup-go@v2
+        uses: actions/setup-go@v5
         with:
-          go-version: 1.16
+          go-version: '1.22'
         id: go
       # Look for a CLI that's made for this PR
       - name: Fetch built CLI
         id: cli-cache
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         with:
           path: ./_output/bin/linux/amd64/velero
           # The cache key a combination of the current PR number and the commit SHA
           key: velero-cli-${{ github.event.pull_request.number }}-${{ github.sha }}
       - name: Fetch built image
         id: image-cache
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         with:
           path: ./velero.tar
           # The cache key a combination of the current PR number and the commit SHA
           key: velero-image-${{ github.event.pull_request.number }}-${{ github.sha }}
       - name: Fetch cached go modules
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         if: steps.cli-cache.outputs.cache-hit != 'true'
         with:
           path: ~/go/pkg/mod
@@ -40,7 +40,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-
       - name: Check out the code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         if: steps.cli-cache.outputs.cache-hit != 'true' || steps.image-cache.outputs.cache-hit != 'true'
       # If no binaries were built for this PR, build it now.
       - name: Build Velero CLI
@@ -53,47 +53,51 @@ jobs:
         run: |
           IMAGE=velero VERSION=pr-test make container
           docker save velero:pr-test -o ./velero.tar
-  # Run E2E test against all kubernetes versions on kind
+  # Run E2E test against all Kubernetes versions on kind
   run-e2e-test:
     needs: build
     runs-on: ubuntu-latest
     strategy:
       matrix:
         k8s:
-          # doesn't cover 1.15 as 1.15 doesn't support "apiextensions.k8s.io/v1" that is needed for the case
-          #- 1.15.12
-          - 1.16.15
-          - 1.17.17
-          - 1.18.15
-          - 1.19.7
-          - 1.20.2
-          - 1.21.1
-          - 1.22.0
+          - 1.23.17
+          - 1.24.17
+          - 1.25.16
+          - 1.26.13
+          - 1.27.10
+          - 1.28.6
+          - 1.29.1
+        labels:
+          # labels are used to filter running E2E cases
+          - Basic && (ClusterResource || NodePort || StorageClass)
+          - ResourceFiltering && !Restic
+          - ResourceModifier || (Backups && BackupsSync) || PrivilegesMgmt || OrderedResources
+          - (NamespaceMapping && Single && Restic) || (NamespaceMapping && Multiple && Restic)
       fail-fast: false
     steps:
       - name: Set up Go
-        uses: actions/setup-go@v2
+        uses: actions/setup-go@v5
         with:
-          go-version: 1.16
+          go-version: '1.22'
         id: go
       - name: Check out the code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Install MinIO
         run:
           docker run -d --rm -p 9000:9000 -e "MINIO_ACCESS_KEY=minio" -e "MINIO_SECRET_KEY=minio123" -e "MINIO_DEFAULT_BUCKETS=bucket,additional-bucket" bitnami/minio:2021.6.17-debian-10-r7
       - uses: engineerd/setup-kind@v0.5.0
         with:
-          version: "v0.11.1"
+          version: "v0.21.0"
           image: "kindest/node:v${{ matrix.k8s }}"
       - name: Fetch built CLI
         id: cli-cache
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         with:
           path: ./_output/bin/linux/amd64/velero
           key: velero-cli-${{ github.event.pull_request.number }}-${{ github.sha }}
       - name: Fetch built Image
         id: image-cache
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         with:
           path: ./velero.tar
           key: velero-image-${{ github.event.pull_request.number }}-${{ github.sha }}
@@ -102,7 +106,7 @@ jobs:
           kind load image-archive velero.tar
       # always try to fetch the cached go modules as the e2e test needs it either
       - name: Fetch cached go modules
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         with:
           path: ~/go/pkg/mod
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
@@ -115,10 +119,28 @@ jobs:
           aws_access_key_id=minio
           aws_secret_access_key=minio123
           EOF
-          GOPATH=~/go CLOUD_PROVIDER=kind \
-              OBJECT_STORE_PROVIDER=aws BSL_CONFIG=region=minio,s3ForcePathStyle="true",s3Url=http://$(hostname -i):9000 \
-              CREDS_FILE=/tmp/credential BSL_BUCKET=bucket \
-              ADDITIONAL_OBJECT_STORE_PROVIDER=aws ADDITIONAL_BSL_CONFIG=region=minio,s3ForcePathStyle="true",s3Url=http://$(hostname -i):9000 \
-              ADDITIONAL_CREDS_FILE=/tmp/credential ADDITIONAL_BSL_BUCKET=additional-bucket \
-              GINKGO_FOCUS=Basic VELERO_IMAGE=velero:pr-test \
-              make -C test/e2e run
+
+          # Match kubectl version to k8s server version
+          curl -LO https://dl.k8s.io/release/v${{ matrix.k8s }}/bin/linux/amd64/kubectl
+          sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+
+          GOPATH=~/go \
+              CLOUD_PROVIDER=kind \
+              OBJECT_STORE_PROVIDER=aws \
+              BSL_CONFIG=region=minio,s3ForcePathStyle="true",s3Url=http://$(hostname -i):9000 \
+              CREDS_FILE=/tmp/credential \
+              BSL_BUCKET=bucket \
+              ADDITIONAL_OBJECT_STORE_PROVIDER=aws \
+              ADDITIONAL_BSL_CONFIG=region=minio,s3ForcePathStyle="true",s3Url=http://$(hostname -i):9000 \
+              ADDITIONAL_CREDS_FILE=/tmp/credential \
+              ADDITIONAL_BSL_BUCKET=additional-bucket \
+              VELERO_IMAGE=velero:pr-test \
+              GINKGO_LABELS="${{ matrix.labels }}" \
+              make -C test/ run-e2e
+        timeout-minutes: 30
+      - name: Upload debug bundle
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: DebugBundle
+          path: /home/runner/work/velero/velero/test/e2e/debug-bundle*

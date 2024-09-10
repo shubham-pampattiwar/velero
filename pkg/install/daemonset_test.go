@@ -26,7 +26,7 @@ import (
 func TestDaemonSet(t *testing.T) {
 	ds := DaemonSet("velero")
 
-	assert.Equal(t, "restic", ds.Spec.Template.Spec.Containers[0].Name)
+	assert.Equal(t, "node-agent", ds.Spec.Template.Spec.Containers[0].Name)
 	assert.Equal(t, "velero", ds.ObjectMeta.Namespace)
 
 	ds = DaemonSet("velero", WithImage("velero/velero:v0.11"))
@@ -34,10 +34,13 @@ func TestDaemonSet(t *testing.T) {
 	assert.Equal(t, corev1.PullIfNotPresent, ds.Spec.Template.Spec.Containers[0].ImagePullPolicy)
 
 	ds = DaemonSet("velero", WithSecret(true))
-	assert.Equal(t, 7, len(ds.Spec.Template.Spec.Containers[0].Env))
-	assert.Equal(t, 3, len(ds.Spec.Template.Spec.Volumes))
+	assert.Len(t, ds.Spec.Template.Spec.Containers[0].Env, 7)
+	assert.Len(t, ds.Spec.Template.Spec.Volumes, 4)
 
 	ds = DaemonSet("velero", WithFeatures([]string{"foo,bar,baz"}))
 	assert.Len(t, ds.Spec.Template.Spec.Containers[0].Args, 3)
 	assert.Equal(t, "--features=foo,bar,baz", ds.Spec.Template.Spec.Containers[0].Args[2])
+
+	ds = DaemonSet("velero", WithServiceAccountName("test-sa"))
+	assert.Equal(t, "test-sa", ds.Spec.Template.Spec.ServiceAccountName)
 }

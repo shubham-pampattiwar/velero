@@ -1,5 +1,5 @@
 /*
-Copyright 2020 the Velero contributors.
+Copyright The Velero Contributors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,7 +22,6 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	kubeerrs "k8s.io/apimachinery/pkg/util/errors"
@@ -32,6 +31,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/client"
 	"github.com/vmware-tanzu/velero/pkg/cmd"
 	"github.com/vmware-tanzu/velero/pkg/cmd/cli"
+	"github.com/vmware-tanzu/velero/pkg/cmd/util/confirm"
 )
 
 // NewDeleteCommand creates and returns a new cobra command for deleting backup-locations.
@@ -50,7 +50,7 @@ func NewDeleteCommand(f client.Factory, use string) *cobra.Command {
   # Delete backup storage locations named "backup-location-1" and "backup-location-2".
   velero backup-location delete backup-location-1 backup-location-2
 		
-  # Delete all backup storage locations labelled with "foo=bar".
+  # Delete all backup storage locations labeled with "foo=bar".
   velero backup-location delete --selector foo=bar
 
   # Delete all backup storage locations.
@@ -68,7 +68,7 @@ func NewDeleteCommand(f client.Factory, use string) *cobra.Command {
 
 // Run performs the delete backup-location operation.
 func Run(f client.Factory, o *cli.DeleteOptions) error {
-	if !o.Confirm && !cli.GetConfirmation() {
+	if !o.Confirm && !confirm.GetConfirmation() {
 		// Don't do anything unless we get confirmation
 		return nil
 	}
@@ -114,13 +114,71 @@ func Run(f client.Factory, o *cli.DeleteOptions) error {
 	}
 
 	// Create a backup-location deletion request for each
-	for _, location := range locations.Items {
-		if err := kbClient.Delete(context.Background(), &location, &kbclient.DeleteOptions{}); err != nil {
+	for i, location := range locations.Items {
+		if err := kbClient.Delete(context.Background(), &locations.Items[i], &kbclient.DeleteOptions{}); err != nil {
 			errs = append(errs, errors.WithStack(err))
 			continue
 		}
 		fmt.Printf("Backup storage location %q deleted successfully.\n", location.Name)
+
+		// Delete backups associated with the deleted BSL.
+		backupList, err := findAssociatedBackups(kbClient, location.Name, f.Namespace())
+		if err != nil {
+			errs = append(errs, fmt.Errorf("find backups associated with BSL %q: %w", location.Name, err))
+		} else if deleteErrs := deleteBackups(kbClient, backupList); deleteErrs != nil {
+			errs = append(errs, deleteErrs...)
+		}
+
+		// Delete backup repositories associated with the deleted BSL.
+		backupRepoList, err := findAssociatedBackupRepos(kbClient, location.Name, f.Namespace())
+		if err != nil {
+			errs = append(errs, fmt.Errorf("find backup repositories associated with BSL %q: %w", location.Name, err))
+		} else if deleteErrs := deleteBackupRepos(kbClient, backupRepoList); deleteErrs != nil {
+			errs = append(errs, deleteErrs...)
+		}
 	}
 
 	return kubeerrs.NewAggregate(errs)
+}
+
+func findAssociatedBackups(client kbclient.Client, bslName, ns string) (velerov1api.BackupList, error) {
+	var backups velerov1api.BackupList
+	err := client.List(context.Background(), &backups, &kbclient.ListOptions{
+		Namespace: ns,
+		Raw:       &metav1.ListOptions{LabelSelector: velerov1api.StorageLocationLabel + "=" + bslName},
+	})
+	return backups, err
+}
+
+func findAssociatedBackupRepos(client kbclient.Client, bslName, ns string) (velerov1api.BackupRepositoryList, error) {
+	var repos velerov1api.BackupRepositoryList
+	err := client.List(context.Background(), &repos, &kbclient.ListOptions{
+		Namespace: ns,
+		Raw:       &metav1.ListOptions{LabelSelector: velerov1api.StorageLocationLabel + "=" + bslName},
+	})
+	return repos, err
+}
+
+func deleteBackups(client kbclient.Client, backups velerov1api.BackupList) []error {
+	var errs []error
+	for i, backup := range backups.Items {
+		if err := client.Delete(context.Background(), &backups.Items[i], &kbclient.DeleteOptions{}); err != nil {
+			errs = append(errs, errors.WithStack(fmt.Errorf("delete backup %q associated with deleted BSL: %w", backup.Name, err)))
+			continue
+		}
+		fmt.Printf("Backup associated with deleted BSL(s) %q deleted successfully.\n", backup.Name)
+	}
+	return errs
+}
+
+func deleteBackupRepos(client kbclient.Client, repos velerov1api.BackupRepositoryList) []error {
+	var errs []error
+	for i, repo := range repos.Items {
+		if err := client.Delete(context.Background(), &repos.Items[i], &kbclient.DeleteOptions{}); err != nil {
+			errs = append(errs, errors.WithStack(fmt.Errorf("delete backup repository %q associated with deleted BSL: %w", repo.Name, err)))
+			continue
+		}
+		fmt.Printf("Backup repository associated with deleted BSL(s) %q deleted successfully.\n", repo.Name)
+	}
+	return errs
 }

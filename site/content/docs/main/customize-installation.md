@@ -17,19 +17,25 @@ By default, `velero install` expects a credentials file for your `velero` IAM ac
 
 If you are using an alternate identity mechanism, such as kube2iam/kiam on AWS, Workload Identity on GKE, etc., that does not require a credentials file, you can specify the `--no-secret` flag instead of `--secret-file`.
 
-## Enable restic integration
+## Enable file system backup
 
-By default, `velero install` does not install Velero's [restic integration][3]. To enable it, specify the `--use-restic` flag.
+By default, `velero install` does not install Velero's [File System Backup][3]. To enable it, specify the `--use-node-agent` flag.
 
-If you've already run `velero install` without the `--use-restic` flag, you can run the same command again, including the `--use-restic` flag, to add the restic integration to your existing install.
+If you've already run `velero install` without the `--use-node-agent` flag, you can run the same command again, including the `--use-node-agent` flag, to add the file system backup to your existing install.
 
-## Default Pod Volume backup to restic
+## CSI Snapshot Data Movement
 
-By default, `velero install` does not enable use of restic to take backups of all pod volumes. An annotation has to be applied on every pod which contains volumes to be backed up by restic.
+Velero node-agent is required by [CSI Snapshot Data Movement][12] when Velero built-in data mover is used. By default, `velero install` does not install Velero's node-agent. To enable it, specify the `--use-node-agent` flag.
 
-To backup all pod volumes using restic without having to apply annotation on the pod, run the `velero install` command with the `--default-volumes-to-restic` flag.
+For some use cases, Velero node-agent requires to run under privileged mode. For example, when backing up block volumes, it is required to allow the node-agent to access the block device. To enable it set velero install flags `--privileged-node-agent`.
 
-Using this flag requires restic integration to be enabled with the `--use-restic` flag. Please refer to the [restic integration][3] page for more information.
+If you've already run `velero install` without the `--use-node-agent` or `--privileged-node-agent` flag, you can run the same command again, including the `--use-node-agent` or `--privileged-node-agent` flag, to add CSI snapshot data movement to your existing install.
+
+## Default Pod Volume backup to file system backup
+
+By default, `velero install` does not enable the use of File System Backup (FSB) to take backups of all pod volumes. You must apply an [annotation](file-system-backup.md/#using-opt-in-pod-volume-backup) to every pod which contains volumes for Velero to use FSB for the backup.
+
+If you are planning to only use FSB for volume backups, you can run the `velero install` command with the `--default-volumes-to-fs-backup` flag. This will default all pod volumes backups to use FSB without having to apply annotations to pods. Note that when this flag is set during install, Velero will always try to use FSB to perform the backup, even want an individual backup to use volume snapshots, by setting the `--snapshot-volumes` flag in the `backup create` command. Alternatively, you can set the  `--default-volumes-to-fs-backup` on an individual backup to to make sure Velero uses FSB for each volume being backed up.
 
 ## Enable features
 
@@ -45,15 +51,15 @@ velero install --features=EnableCSI
 
 Another example is enabling the support of multiple API group versions, as documented at [- -features=EnableAPIGroupVersions](enable-api-group-versions-feature.md).
 
-Feature flags, passed to `velero install` will be passed to the Velero deployment and also to the `restic` daemon set, if `--use-restic` flag is used.
+Feature flags, passed to `velero install` will be passed to the Velero deployment and also to the `node-agent` daemon set, if `--use-node-agent` flag is used.
 
 Similarly, features may be disabled by removing the corresponding feature flags from the `--features` flag.
 
-Enabling and disabling feature flags will require modifying the Velero deployment and also the restic daemonset. This may be done from the CLI by uninstalling and re-installing Velero, or by editing the `deploy/velero` and `daemonset/restic` resources in-cluster.
+Enabling and disabling feature flags will require modifying the Velero deployment and also the node-agent daemonset. This may be done from the CLI by uninstalling and re-installing Velero, or by editing the `deploy/velero` and `daemonset/node-agent` resources in-cluster.
 
 ```bash
 $ kubectl -n velero edit deploy/velero
-$ kubectl -n velero edit daemonset/restic
+$ kubectl -n velero edit daemonset/node-agent
 ```
 
 ### Enable client side features
@@ -61,7 +67,7 @@ $ kubectl -n velero edit daemonset/restic
 For some features it may be necessary to use the `--features` flag to the Velero client. This may be done by passing the `--features` on every command run using the Velero CLI or the by setting the features in the velero client config file using the `velero client config set` command as shown below:
 
 ```bash
-velero client config set features=EnableCSI
+velero client config set features=feature1,feature2...
 ```
 
 This stores the config in a file at `$HOME/.config/velero/config.json`.
@@ -89,16 +95,23 @@ the config file setting.
 
 ## Customize resource requests and limits
 
-At installation, Velero sets default resource requests and limits for the Velero pod and the restic pod, if you using the [restic integration](/docs/main/restic/).
+At installation, You could set resource requests and limits for the Velero pod, the node-agent pod and the [repository maintenance job][14], if you are using the [File System Backup][3] or [CSI Snapshot Data Movement][12].  
 
 {{< table caption="Velero Customize resource requests and limits defaults" >}}
-|Setting|Velero pod defaults|restic pod defaults|
+|Setting|Velero pod defaults|node-agent pod defaults|
 |--- |--- |--- |
-|CPU request|500m|500m|
-|Memory requests|128Mi|512Mi|
-|CPU limit|1000m (1 CPU)|1000m (1 CPU)|
-|Memory limit|512Mi|1024Mi|
+|CPU request|500m|N/A|
+|Memory requests|128Mi|N/A|
+|CPU limit|1000m (1 CPU)|N/A|
+|Memory limit|512Mi|N/A|
 {{< /table >}}
+  
+For Velero pod, through testing, the Velero maintainers have found these defaults work well when backing up and restoring 1000 or less resources.  
+For node-agent pod, by default it doesn't have CPU/memory request/limit, so that the backups/restores won't break due to resource throttling. The Velero maintainers have also done some [Performance Tests][13] to show the relationship of CPU/memory usage and the scale of data being backed up/restored.
+
+For repository maintenance job, it's no limit on resources by default. You could configure the job resource limitation based on target data to be backed up, some further settings please refer to [repository maintenance job][14].
+
+You don't have to change the defaults all the time, but if you need, it's recommended that you perform your own testing to find the best resource limits for your clusters and resources.   
 
 ### Install with custom resource requests and limits
 
@@ -110,17 +123,21 @@ velero install \
   --velero-pod-mem-request <MEMORY_REQUEST> \
   --velero-pod-cpu-limit <CPU_LIMIT> \
   --velero-pod-mem-limit <MEMORY_LIMIT> \
-  [--use-restic] \
-  [--default-volumes-to-restic] \
-  [--restic-pod-cpu-request <CPU_REQUEST>] \
-  [--restic-pod-mem-request <MEMORY_REQUEST>] \
-  [--restic-pod-cpu-limit <CPU_LIMIT>] \
-  [--restic-pod-mem-limit <MEMORY_LIMIT>]
+  [--use-node-agent] \
+  [--default-volumes-to-fs-backup] \
+  [--node-agent-pod-cpu-request <CPU_REQUEST>] \
+  [--node-agent-pod-mem-request <MEMORY_REQUEST>] \
+  [--node-agent-pod-cpu-limit <CPU_LIMIT>] \
+  [--node-agent-pod-mem-limit <MEMORY_LIMIT>] \
+  [--maintenance-job-cpu-request <CPU_REQUEST>] \
+  [--maintenance-job-mem-request <MEMORY_REQUEST>] \
+  [--maintenance-job-cpu-limit <CPU_LIMIT>] \
+  [--maintenance-job-mem-limit <MEMORY_LIMIT>]
 ```
 
 ### Update resource requests and limits after install
 
-After installation you can adjust the resource requests and limits in the Velero Deployment spec or restic DeamonSet spec, if you are using the restic integration.
+After installation you can adjust the resource requests and limits in the Velero Deployment spec or node-agent DaemonSet spec, if you are using the File System Backup.
 
 **Velero pod**
 
@@ -131,16 +148,16 @@ kubectl patch deployment velero -n velero --patch \
 '{"spec":{"template":{"spec":{"containers":[{"name": "velero", "resources": {"limits":{"cpu": "1", "memory": "512Mi"}, "requests": {"cpu": "1", "memory": "128Mi"}}}]}}}}'
 ```
 
-**restic pod**
+**node-agent pod**
 
-Update the `spec.template.spec.containers.resources.limits` and `spec.template.spec.containers.resources.requests` values in the restic DeamonSet spec.
+Update the `spec.template.spec.containers.resources.limits` and `spec.template.spec.containers.resources.requests` values in the node-agent DaemonSet spec.
 
 ```bash
-kubectl patch daemonset restic -n velero --patch \
-'{"spec":{"template":{"spec":{"containers":[{"name": "restic", "resources": {"limits":{"cpu": "1", "memory": "1024Mi"}, "requests": {"cpu": "1", "memory": "512Mi"}}}]}}}}'
+kubectl patch daemonset node-agent -n velero --patch \
+'{"spec":{"template":{"spec":{"containers":[{"name": "node-agent", "resources": {"limits":{"cpu": "1", "memory": "1024Mi"}, "requests": {"cpu": "1", "memory": "512Mi"}}}]}}}}'
 ```
 
-Additionally, you may want to update the the default Velero restic pod operation timeout (default 240 minutes) to allow larger backups more time to complete. You can adjust this timeout by adding the `- --restic-timeout` argument to the Velero Deployment spec.
+Additionally, you may want to update the the default File System Backup operation timeout (default 240 minutes) to allow larger backups more time to complete. You can adjust this timeout by adding the `- --fs-backup-timeout` argument to the Velero Deployment spec.
 
 **NOTE:** Changes made to this timeout value will revert back to the default value if you re-run the Velero install command.
 
@@ -150,7 +167,7 @@ Additionally, you may want to update the the default Velero restic pod operation
     kubectl edit deploy velero -n velero
     ```
 
-1. Add `- --restic-timeout` to `spec.template.spec.containers`.
+1. Add `- --fs-backup-timeout` to `spec.template.spec.containers`.
 
     ```yaml
     spec:
@@ -158,7 +175,7 @@ Additionally, you may want to update the the default Velero restic pod operation
         spec:
           containers:
           - args:
-            - --restic-timeout=240m
+            - --fs-backup-timeout=240m
     ```
 
 ## Configure more than one storage location for backups or volume snapshots
@@ -168,6 +185,51 @@ Velero supports any number of backup storage locations and volume snapshot locat
 However, `velero install` only supports configuring at most one backup storage location and one volume snapshot location.
 
 To configure additional locations after running `velero install`, use the `velero backup-location create` and/or `velero snapshot-location create` commands along with provider-specific configuration. Use the `--help` flag on each of these commands for more details.
+
+### Set default backup storage location or volume snapshot locations
+
+When performing backups, Velero needs to know where to backup your data. This means that if you configure multiple locations, you must specify the location Velero should use each time you run `velero backup create`, or you can set a default backup storage location or default volume snapshot locations. If you only have one backup storage location or volume snapshot location set for a provider, Velero will automatically use that location as the default.
+
+#### Set default backup storage location
+currently, Velero could set the default backup storage location as below:
+- First way: Set a default backup storage location by passing a `--default` flag when running `velero backup-location create`.
+
+  ```
+  velero backup-location create backups-primary \
+    --provider aws \
+    --bucket velero-backups \
+    --config region=us-east-1 \
+    --default
+  ```
+- Second way: Set a default backup storage location by passing a  `--default` flag when running `velero backup-location set`.
+  ```bash
+  velero backup-location set backups-primary --default
+  ```
+  We also could remove the default backup storage location by this command, below is one example
+  ```bash
+  velero backup-location set backups-primary --default=false
+  ```
+- Third way: Set a default backup storage location by passing `--default-backup-storage-location` flag on the `velero server` command.
+   ```bash
+  velero server --default-backup-storage-location backups-primary
+   ```
+Note: Only could have one default backup storage location, which means it's not allowed to set two default backup storage locations at the same time, the priorities among these three are as follows:
+- if velero server side has specified one default backup storage location, suppose it's `A`
+  - if `A` backup storage location exists, it's not allowed to set a new default backup storage location
+  - if `A` does not exist
+    - if using `velero backup-location set` or `velero backup-location create --default` command
+      - it could be successful if no default backup storage location exists.
+      - it would fail if already exist one default backup storage location. (So it need to remove other default backup storage location at first)
+- if velero server side has not specified one default backup storage location
+  - if using `velero backup-location set` or `velero backup-location create --default` command
+    - it could be successful if no default backup storage location exists.
+    - it would fail if already exist one default backup storage location. (So it need to remove other default backup storage location at first)
+#### Set default volume snapshot location
+You can set a default volume snapshot location for each of your volume snapshot providers using the `--default-volume-snapshot-locations` flag on the `velero server` command.
+
+```
+velero server --default-volume-snapshot-locations="<PROVIDER-NAME>:<LOCATION-NAME>,<PROVIDER2-NAME>:<LOCATION2-NAME>"
+```
 
 ## Do not configure a backup storage location during install
 
@@ -358,7 +420,7 @@ If you get an error like `complete:13: command not found: compdef`, then add the
 
 [1]: https://github.com/vmware-tanzu/velero/releases/latest
 [2]: namespace.md
-[3]: restic.md
+[3]: file-system-backup.md
 [4]: on-premises.md
 [6]: velero-install.md#usage
 [7]: https://github.com/vmware-tanzu/velero/issues/2077
@@ -366,3 +428,6 @@ If you get an error like `complete:13: command not found: compdef`, then add the
 [9]: self-signed-certificates.md
 [10]: csi.md
 [11]: https://github.com/vmware-tanzu/velero/blob/main/pkg/apis/velero/v1/constants.go
+[12]: csi-snapshot-data-movement.md
+[13]: performance-guidance.md
+[14]: repository-maintenance.md

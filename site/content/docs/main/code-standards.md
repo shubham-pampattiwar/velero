@@ -8,6 +8,24 @@ toc: "true"
 
 When opening a pull request, please fill out the checklist supplied the template. This will help others properly categorize and review your pull request.
 
+### PR title
+
+Make sure that the pull request title summarizes the change made (and not just "fixes issue #xxxx"):
+
+Example PR titles:
+
+ - "Check for nil when validating foo"
+ - "Issue #1234: Check for nil when validating foo"
+
+### Cherry-pick PRs
+
+When a PR to main needs to be cherry-picked to a release branch, please wait until the main PR is merged first before creating the CP PR. If the CP PR is made before the main PR is merged, there is a risk that PR modifications in response to review comments will not make it into the CP PR.
+
+The Cherry-pick PR title should reference the branch it's cherry-picked to and the fact that it's a CP of a commit to main:
+
+ - "[release-1.13 CP] Issue #1234: Check for nil when validating foo"
+
+
 ## Adding a changelog
 
 Authors are expected to include a changelog file with their pull requests. The changelog file
@@ -20,11 +38,13 @@ changelog.
 
 Add that to the PR.
 
-If a PR does not warrant a changelog, the CI check for a changelog can be skipped by applying a `changelog-not-required` label on the PR.
+A command to do this is `make new-changelog CHANGELOG_BODY="Changes you have made"`
 
-## Copyright header 
+If a PR does not warrant a changelog, the CI check for a changelog can be skipped by applying a `changelog-not-required` label on the PR. If you are making a PR on a release branch, you should still make a new file in the `changelogs/unreleased` folder on the release branch for your change. 
 
-Whenever a source code file is being modified, the copyright notice should be updated to our standard copyright notice. That is, it should read “Copyright the Velero contributors.” 
+## Copyright header
+
+Whenever a source code file is being modified, the copyright notice should be updated to our standard copyright notice. That is, it should read “Copyright the Velero contributors.”
 
 For new files, the entire copyright and license header must be added.
 
@@ -61,7 +81,7 @@ Example:
     	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
     	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
     	corev1listers "k8s.io/client-go/listers/core/v1"
-       
+
         velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
         velerov1client "github.com/vmware-tanzu/velero/pkg/generated/clientset/versioned/typed/velero/v1"
     )
@@ -70,13 +90,13 @@ Example:
 
 We use a package to generate mocks for our interfaces.
 
-Example: if you want to change this mock: https://github.com/vmware-tanzu/velero/blob/main/pkg/restic/mocks/restorer.go
+Example: if you want to change this mock: https://github.com/vmware-tanzu/velero/blob/main/pkg/podvolume/mocks/restorer.go
 
 Run:
 
 ```bash
 go get github.com/vektra/mockery/.../
-cd pkg/restic
+cd pkg/podvolume
 mockery -name=Restorer
 ```
 
@@ -108,7 +128,7 @@ Signed-off-by: Joe Beda <joe@heptio.com>
 
 This can easily be done with the `--signoff` option to `git commit`.
 
-By doing this you state that you can certify the following (from https://developercertificate.org/):
+By doing this you state that you can certify the following (from [https://developercertificate.org/](https://developercertificate.org/)):
 
 ```
 Developer Certificate of Origin

@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -27,14 +28,15 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/persistence"
 	persistencemocks "github.com/vmware-tanzu/velero/pkg/persistence/mocks"
 
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	velerov2alpha1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
 
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -71,7 +73,7 @@ var _ = BeforeSuite(func(done Done) {
 	}()
 
 	close(done)
-}, 60)
+})
 
 var _ = AfterSuite(func() {
 	By("tearing down the test environment")
@@ -86,7 +88,6 @@ type testEnvironment struct {
 	Config *rest.Config
 
 	doneMgr context.Context
-	cancel  context.CancelFunc
 }
 
 // newTestEnvironment creates a new environment spinning up a local api-server.
@@ -96,6 +97,9 @@ type testEnvironment struct {
 func newTestEnvironment() *testEnvironment {
 	// scheme.Scheme is initialized with all native Kubernetes types
 	err := velerov1api.AddToScheme(scheme.Scheme)
+	Expect(err).NotTo(HaveOccurred())
+
+	err = velerov2alpha1api.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 
 	env = &envtest.Environment{
@@ -128,6 +132,13 @@ func (t *testEnvironment) startManager() error {
 func (t *testEnvironment) stop() error {
 	cancel()
 	return env.Stop()
+}
+
+type fakeErrorBackupStoreGetter struct {
+}
+
+func (f *fakeErrorBackupStoreGetter) Get(*velerov1api.BackupStorageLocation, persistence.ObjectStoreGetter, logrus.FieldLogger) (persistence.BackupStore, error) {
+	return nil, fmt.Errorf("some error")
 }
 
 type fakeSingleObjectBackupStoreGetter struct {

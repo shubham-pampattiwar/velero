@@ -18,6 +18,7 @@ package storage
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/pkg/errors"
@@ -71,10 +72,7 @@ func IsReadyToValidate(bslValidationFrequency *metav1.Duration, lastValidationTi
 
 	// We want to validate BSL only if the set validation frequency/ interval has elapsed.
 	nextValidation := lastValidation.Add(validationFrequency) // next validation time: last validation time + validation frequency
-	if time.Now().UTC().Before(nextValidation) {              // ready only when NOW is equal to or after the next validation time
-		return false
-	}
-	return true
+	return !time.Now().UTC().Before(nextValidation)           // ready only when NOW is equal to or after the next validation time
 }
 
 // ListBackupStorageLocations verifies if there are any backup storage locations.
@@ -94,4 +92,19 @@ func ListBackupStorageLocations(ctx context.Context, kbClient client.Client, nam
 	}
 
 	return locations, nil
+}
+
+func GetDefaultBackupStorageLocations(ctx context.Context, kbClient client.Client, namespace string) (*velerov1api.BackupStorageLocationList, error) {
+	locations := new(velerov1api.BackupStorageLocationList)
+	defaultLocations := new(velerov1api.BackupStorageLocationList)
+	if err := kbClient.List(context.Background(), locations, &client.ListOptions{Namespace: namespace}); err != nil {
+		return defaultLocations, errors.Wrapf(err, fmt.Sprintf("failed to list backup storage locations in namespace %s", namespace))
+	}
+
+	for _, location := range locations.Items {
+		if location.Spec.Default {
+			defaultLocations.Items = append(defaultLocations.Items, location)
+		}
+	}
+	return defaultLocations, nil
 }

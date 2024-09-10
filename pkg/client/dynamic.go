@@ -18,6 +18,7 @@ package client
 
 import (
 	"context"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -25,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/dynamic/dynamicinformer"
 )
 
 // DynamicFactory contains methods for retrieving dynamic clients for GroupVersionResources and
@@ -33,6 +35,8 @@ type DynamicFactory interface {
 	// ClientForGroupVersionResource returns a Dynamic client for the given group/version
 	// and resource for the given namespace.
 	ClientForGroupVersionResource(gv schema.GroupVersion, resource metav1.APIResource, namespace string) (Dynamic, error)
+	// DynamicSharedInformerFactory returns a DynamicSharedInformerFactory.
+	DynamicSharedInformerFactory() dynamicinformer.DynamicSharedInformerFactory
 }
 
 // dynamicFactory implements DynamicFactory.
@@ -49,6 +53,10 @@ func (f *dynamicFactory) ClientForGroupVersionResource(gv schema.GroupVersion, r
 	return &dynamicResourceClient{
 		resourceClient: f.dynamicClient.Resource(gv.WithResource(resource.Name)).Namespace(namespace),
 	}, nil
+}
+
+func (f *dynamicFactory) DynamicSharedInformerFactory() dynamicinformer.DynamicSharedInformerFactory {
+	return dynamicinformer.NewDynamicSharedInformerFactory(f.dynamicClient, time.Minute)
 }
 
 // Creator creates an object.
@@ -89,6 +97,11 @@ type Deletor interface {
 	Delete(name string, opts metav1.DeleteOptions) error
 }
 
+// StatusUpdater updates status field of a object
+type StatusUpdater interface {
+	UpdateStatus(obj *unstructured.Unstructured, opts metav1.UpdateOptions) (*unstructured.Unstructured, error)
+}
+
 // Dynamic contains client methods that Velero needs for backing up and restoring resources.
 type Dynamic interface {
 	Creator
@@ -97,6 +110,7 @@ type Dynamic interface {
 	Getter
 	Patcher
 	Deletor
+	StatusUpdater
 }
 
 // dynamicResourceClient implements Dynamic.
@@ -128,4 +142,8 @@ func (d *dynamicResourceClient) Patch(name string, data []byte) (*unstructured.U
 
 func (d *dynamicResourceClient) Delete(name string, opts metav1.DeleteOptions) error {
 	return d.resourceClient.Delete(context.TODO(), name, opts)
+}
+
+func (d *dynamicResourceClient) UpdateStatus(obj *unstructured.Unstructured, opts metav1.UpdateOptions) (*unstructured.Unstructured, error) {
+	return d.resourceClient.UpdateStatus(context.TODO(), obj, opts)
 }

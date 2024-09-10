@@ -1,5 +1,5 @@
 /*
-Copyright 2019 the Velero contributors.
+Copyright The Velero Contributors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -76,6 +76,11 @@ func (b *PodBuilder) NodeName(val string) *PodBuilder {
 	return b
 }
 
+func (b *PodBuilder) Labels(labels map[string]string) *PodBuilder {
+	b.object.Labels = labels
+	return b
+}
+
 func (b *PodBuilder) InitContainers(containers ...*corev1api.Container) *PodBuilder {
 	for _, c := range containers {
 		b.object.Spec.InitContainers = append(b.object.Spec.InitContainers, *c)
@@ -94,5 +99,15 @@ func (b *PodBuilder) ContainerStatuses(containerStatuses ...*corev1api.Container
 	for _, c := range containerStatuses {
 		b.object.Status.ContainerStatuses = append(b.object.Status.ContainerStatuses, *c)
 	}
+	return b
+}
+
+func (b *PodBuilder) Phase(phase corev1api.PodPhase) *PodBuilder {
+	b.object.Status.Phase = phase
+	return b
+}
+
+func (b *PodBuilder) Status(status corev1api.PodStatus) *PodBuilder {
+	b.object.Status = status
 	return b
 }

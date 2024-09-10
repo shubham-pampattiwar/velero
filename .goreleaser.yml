@@ -14,7 +14,7 @@
 
 dist: _output
 builds:
-  - main: ./cmd/velero/main.go
+  - main: ./cmd/velero/velero.go
     env:
       - CGO_ENABLED=0
     goos:
@@ -27,11 +27,9 @@ builds:
       - arm64
       - ppc64le
     ignore:
-      # don't build arm/arm64 for darwin or windows
+      # don't build arm for darwin and arm/arm64 for windows
       - goos: darwin
         goarch: arm
-      - goos: darwin
-        goarch: arm64
       - goos: darwin
         goarch: ppc64le
       - goos: windows
@@ -56,3 +54,10 @@ release:
     name: velero
   draft: true
   prerelease: auto
+
+git:
+  # What should be used to sort tags when gathering the current and previous
+  # tags if there are more than one tag in the same commit.
+  #
+  # Default: `-version:refname`
+  tag_sort: -version:creatordate

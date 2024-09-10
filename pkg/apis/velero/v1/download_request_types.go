@@ -1,5 +1,5 @@
 /*
-Copyright the Velero contributors.
+Copyright The Velero Contributors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -25,16 +25,24 @@ type DownloadRequestSpec struct {
 }
 
 // DownloadTargetKind represents what type of file to download.
-// +kubebuilder:validation:Enum=BackupLog;BackupContents;BackupVolumeSnapshots;BackupResourceList;RestoreLog;RestoreResults
+// +kubebuilder:validation:Enum=BackupLog;BackupContents;BackupVolumeSnapshots;BackupItemOperations;BackupResourceList;BackupResults;RestoreLog;RestoreResults;RestoreResourceList;RestoreItemOperations;CSIBackupVolumeSnapshots;CSIBackupVolumeSnapshotContents;BackupVolumeInfos;RestoreVolumeInfo
 type DownloadTargetKind string
 
 const (
-	DownloadTargetKindBackupLog             DownloadTargetKind = "BackupLog"
-	DownloadTargetKindBackupContents        DownloadTargetKind = "BackupContents"
-	DownloadTargetKindBackupVolumeSnapshots DownloadTargetKind = "BackupVolumeSnapshots"
-	DownloadTargetKindBackupResourceList    DownloadTargetKind = "BackupResourceList"
-	DownloadTargetKindRestoreLog            DownloadTargetKind = "RestoreLog"
-	DownloadTargetKindRestoreResults        DownloadTargetKind = "RestoreResults"
+	DownloadTargetKindBackupLog                       DownloadTargetKind = "BackupLog"
+	DownloadTargetKindBackupContents                  DownloadTargetKind = "BackupContents"
+	DownloadTargetKindBackupVolumeSnapshots           DownloadTargetKind = "BackupVolumeSnapshots"
+	DownloadTargetKindBackupItemOperations            DownloadTargetKind = "BackupItemOperations"
+	DownloadTargetKindBackupResourceList              DownloadTargetKind = "BackupResourceList"
+	DownloadTargetKindBackupResults                   DownloadTargetKind = "BackupResults"
+	DownloadTargetKindRestoreLog                      DownloadTargetKind = "RestoreLog"
+	DownloadTargetKindRestoreResults                  DownloadTargetKind = "RestoreResults"
+	DownloadTargetKindRestoreResourceList             DownloadTargetKind = "RestoreResourceList"
+	DownloadTargetKindRestoreItemOperations           DownloadTargetKind = "RestoreItemOperations"
+	DownloadTargetKindCSIBackupVolumeSnapshots        DownloadTargetKind = "CSIBackupVolumeSnapshots"
+	DownloadTargetKindCSIBackupVolumeSnapshotContents DownloadTargetKind = "CSIBackupVolumeSnapshotContents"
+	DownloadTargetKindBackupVolumeInfos               DownloadTargetKind = "BackupVolumeInfos"
+	DownloadTargetKindRestoreVolumeInfo               DownloadTargetKind = "RestoreVolumeInfo"
 )
 
 // DownloadTarget is the specification for what kind of file to download, and the name of the
@@ -43,7 +51,7 @@ type DownloadTarget struct {
 	// Kind is the type of file to download.
 	Kind DownloadTargetKind `json:"kind"`
 
-	// Name is the name of the kubernetes resource with which the file is associated.
+	// Name is the name of the Kubernetes resource with which the file is associated.
 	Name string `json:"name"`
 }
 
@@ -84,7 +92,6 @@ type DownloadRequestStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:object:generate=true
 // +kubebuilder:storageversion
-// +kubebuilder:subresource:status
 
 // DownloadRequest is a request to download an artifact from backup object storage, such as a backup
 // log file.

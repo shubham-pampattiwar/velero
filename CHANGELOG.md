@@ -1,7 +1,14 @@
 ## Current release:
-  * [CHANGELOG-1.7.md][17]
+  * [CHANGELOG-1.14.md][24]
 
 ## Older releases:
+  * [CHANGELOG-1.13.md][23]
+  * [CHANGELOG-1.12.md][22]
+  * [CHANGELOG-1.11.md][21]
+  * [CHANGELOG-1.10.md][20]
+  * [CHANGELOG-1.9.md][19]
+  * [CHANGELOG-1.8.md][18]
+  * [CHANGELOG-1.7.md][17]
   * [CHANGELOG-1.6.md][16]
   * [CHANGELOG-1.5.md][15]
   * [CHANGELOG-1.4.md][14]
@@ -20,6 +27,13 @@
   * [CHANGELOG-0.3.md][1]
 
 
+[24]: https://github.com/vmware-tanzu/velero/blob/main/changelogs/CHANGELOG-1.14.md
+[23]: https://github.com/vmware-tanzu/velero/blob/main/changelogs/CHANGELOG-1.13.md
+[22]: https://github.com/vmware-tanzu/velero/blob/main/changelogs/CHANGELOG-1.12.md
+[21]: https://github.com/vmware-tanzu/velero/blob/main/changelogs/CHANGELOG-1.11.md
+[20]: https://github.com/vmware-tanzu/velero/blob/main/changelogs/CHANGELOG-1.10.md
+[19]: https://github.com/vmware-tanzu/velero/blob/main/changelogs/CHANGELOG-1.9.md
+[18]: https://github.com/vmware-tanzu/velero/blob/main/changelogs/CHANGELOG-1.8.md
 [17]: https://github.com/vmware-tanzu/velero/blob/main/changelogs/CHANGELOG-1.7.md
 [16]: https://github.com/vmware-tanzu/velero/blob/main/changelogs/CHANGELOG-1.6.md
 [15]: https://github.com/vmware-tanzu/velero/blob/main/changelogs/CHANGELOG-1.5.md

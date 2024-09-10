@@ -34,14 +34,18 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/util/encode"
 )
 
-const downloadRequestTimeout = 30 * time.Second
+const (
+	downloadRequestTimeout = 30 * time.Second
+	emptyDisplay           = "<none>"
+	defaultDataMover       = "velero"
+)
 
 // BindFlags defines a set of output-specific flags within the provided
 // FlagSet.
 func BindFlags(flags *pflag.FlagSet) {
 	flags.StringP("output", "o", "table", "Output display format. For create commands, display the object but do not send it to the server. Valid formats are 'table', 'json', and 'yaml'. 'table' is not valid for the install command.")
 	labelColumns := flag.NewStringArray()
-	flags.Var(&labelColumns, "label-columns", "A comma-separated list of labels to be displayed as columns")
+	flags.VarP(&labelColumns, "label-columns", "L", "Accepts a comma separated list of labels that are going to be presented as columns. Names are case-sensitive. You can also use multiple flag options like -L label1 -L label2...")
 	flags.Bool("show-labels", false, "Show labels in the last column")
 }
 
@@ -58,7 +62,9 @@ func ClearOutputFlagDefault(cmd *cobra.Command) {
 		return
 	}
 	f.DefValue = ""
-	f.Value.Set("")
+	if err := f.Value.Set(""); err != nil {
+		fmt.Printf("error clear the default value of output flag: %s\n", err.Error())
+	}
 }
 
 // GetOutputFlagValue returns the value of the "output" flag
@@ -146,78 +152,74 @@ func printTable(cmd *cobra.Command, obj runtime.Object) (bool, error) {
 	// 1. generate table
 	var table *metav1.Table
 
-	switch obj.(type) {
+	switch objType := obj.(type) {
 	case *velerov1api.Backup:
 		table = &metav1.Table{
 			ColumnDefinitions: backupColumns,
-			Rows:              printBackup(obj.(*velerov1api.Backup)),
+			Rows:              printBackup(objType),
 		}
 	case *velerov1api.BackupList:
 		table = &metav1.Table{
 			ColumnDefinitions: backupColumns,
-			Rows:              printBackupList(obj.(*velerov1api.BackupList)),
+			Rows:              printBackupList(objType),
 		}
 	case *velerov1api.Restore:
 		table = &metav1.Table{
 			ColumnDefinitions: restoreColumns,
-			Rows:              printRestore(obj.(*velerov1api.Restore)),
+			Rows:              printRestore(objType),
 		}
 	case *velerov1api.RestoreList:
 		table = &metav1.Table{
 			ColumnDefinitions: restoreColumns,
-			Rows:              printRestoreList(obj.(*velerov1api.RestoreList)),
+			Rows:              printRestoreList(objType),
 		}
 	case *velerov1api.Schedule:
 		table = &metav1.Table{
 			ColumnDefinitions: scheduleColumns,
-			Rows:              printSchedule(obj.(*velerov1api.Schedule)),
+			Rows:              printSchedule(objType),
 		}
 	case *velerov1api.ScheduleList:
 		table = &metav1.Table{
 			ColumnDefinitions: scheduleColumns,
-			Rows:              printScheduleList(obj.(*velerov1api.ScheduleList)),
+			Rows:              printScheduleList(objType),
 		}
-	case *velerov1api.ResticRepository:
+	case *velerov1api.BackupRepository:
 		table = &metav1.Table{
-			ColumnDefinitions: resticRepoColumns,
-			Rows:              printResticRepo(obj.(*velerov1api.ResticRepository)),
+			ColumnDefinitions: backupRepoColumns,
+			Rows:              printBackupRepo(objType),
 		}
-	case *velerov1api.ResticRepositoryList:
+	case *velerov1api.BackupRepositoryList:
 		table = &metav1.Table{
-			ColumnDefinitions: resticRepoColumns,
-			Rows:              printResticRepoList(obj.(*velerov1api.ResticRepositoryList)),
+			ColumnDefinitions: backupRepoColumns,
+			Rows:              printBackupRepoList(objType),
 		}
 	case *velerov1api.BackupStorageLocation:
 		table = &metav1.Table{
 			ColumnDefinitions: backupStorageLocationColumns,
-			Rows:              printBackupStorageLocation(obj.(*velerov1api.BackupStorageLocation)),
+			Rows:              printBackupStorageLocation(objType),
 		}
 	case *velerov1api.BackupStorageLocationList:
 		table = &metav1.Table{
 			ColumnDefinitions: backupStorageLocationColumns,
-			Rows:              printBackupStorageLocationList(obj.(*velerov1api.BackupStorageLocationList)),
+			Rows:              printBackupStorageLocationList(objType),
 		}
 	case *velerov1api.VolumeSnapshotLocation:
 		table = &metav1.Table{
 			ColumnDefinitions: volumeSnapshotLocationColumns,
-			Rows:              printVolumeSnapshotLocation(obj.(*velerov1api.VolumeSnapshotLocation)),
+			Rows:              printVolumeSnapshotLocation(objType),
 		}
 	case *velerov1api.VolumeSnapshotLocationList:
 		table = &metav1.Table{
 			ColumnDefinitions: volumeSnapshotLocationColumns,
-			Rows:              printVolumeSnapshotLocationList(obj.(*velerov1api.VolumeSnapshotLocationList)),
+			Rows:              printVolumeSnapshotLocationList(objType),
 		}
 	case *velerov1api.ServerStatusRequest:
 		table = &metav1.Table{
 			ColumnDefinitions: pluginColumns,
-			Rows:              printPluginList(obj.(*velerov1api.ServerStatusRequest)),
+			Rows:              printPluginList(objType),
 		}
 	default:
 		return false, errors.Errorf("type %T is not supported", obj)
-	}
-
-	if table == nil {
-		return false, errors.Errorf("error generating table for type %T", obj)
 	}
 
 	// 2. print table

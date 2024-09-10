@@ -55,7 +55,7 @@ var kindToResource = map[string]string{
 	"VolumeSnapshotLocation":   "volumesnapshotlocations",
 }
 
-// ResourceGroup represents a collection of kubernetes objects with a common ready condition
+// ResourceGroup represents a collection of Kubernetes objects with a common ready condition
 type ResourceGroup struct {
 	CRDResources   []*unstructured.Unstructured
 	OtherResources []*unstructured.Unstructured
@@ -63,15 +63,15 @@ type ResourceGroup struct {
 
 // crdV1Beta1ReadinessFn returns a function that can be used for polling to check
 // if the provided unstructured v1beta1 CRDs are ready for use in the cluster.
-func crdV1Beta1ReadinessFn(kbClient kbclient.Client, unstructuredCrds []*unstructured.Unstructured) func() (bool, error) {
+func crdV1Beta1ReadinessFn(kbClient kbclient.Client, unstructuredCrds []*unstructured.Unstructured) func(context.Context) (bool, error) {
 	// Track all the CRDs that have been found and in ready state.
 	// len should be equal to len(unstructuredCrds) in the happy path.
-	return func() (bool, error) {
+	return func(ctx context.Context) (bool, error) {
 		foundCRDs := make([]*apiextv1beta1.CustomResourceDefinition, 0)
 		for _, unstructuredCrd := range unstructuredCrds {
 			crd := &apiextv1beta1.CustomResourceDefinition{}
 			key := kbclient.ObjectKey{Name: unstructuredCrd.GetName()}
-			err := kbClient.Get(context.Background(), key, crd)
+			err := kbClient.Get(ctx, key, crd)
 			if apierrors.IsNotFound(err) {
 				return false, nil
 			} else if err != nil {
@@ -96,13 +96,13 @@ func crdV1Beta1ReadinessFn(kbClient kbclient.Client, unstructuredCrds []*unstruc
 
 // crdV1ReadinessFn returns a function that can be used for polling to check
 // if the provided unstructured v1 CRDs are ready for use in the cluster.
-func crdV1ReadinessFn(kbClient kbclient.Client, unstructuredCrds []*unstructured.Unstructured) func() (bool, error) {
-	return func() (bool, error) {
+func crdV1ReadinessFn(kbClient kbclient.Client, unstructuredCrds []*unstructured.Unstructured) func(context.Context) (bool, error) {
+	return func(ctx context.Context) (bool, error) {
 		foundCRDs := make([]*apiextv1.CustomResourceDefinition, 0)
 		for _, unstructuredCrd := range unstructuredCrds {
 			crd := &apiextv1.CustomResourceDefinition{}
 			key := kbclient.ObjectKey{Name: unstructuredCrd.GetName()}
-			err := kbClient.Get(context.Background(), key, crd)
+			err := kbClient.Get(ctx, key, crd)
 			if apierrors.IsNotFound(err) {
 				return false, nil
 			} else if err != nil {
@@ -136,7 +136,7 @@ func crdsAreReady(kbClient kbclient.Client, crds []*unstructured.Unstructured) (
 	// first CRD to determine whether to use the v1beta1 or v1 API during polling.
 	gvk := crds[0].GroupVersionKind()
 
-	var crdReadinessFn func() (bool, error)
+	var crdReadinessFn func(context.Context) (bool, error)
 	if gvk.Version == "v1beta1" {
 		crdReadinessFn = crdV1Beta1ReadinessFn(kbClient, crds)
 	} else if gvk.Version == "v1" {
@@ -145,7 +145,7 @@ func crdsAreReady(kbClient kbclient.Client, crds []*unstructured.Unstructured) (
 		return false, fmt.Errorf("unsupported CRD version %q", gvk.Version)
 	}
 
-	err := wait.PollImmediate(time.Second, time.Minute, crdReadinessFn)
+	err := wait.PollUntilContextTimeout(context.Background(), time.Second, time.Minute, true, crdReadinessFn)
 	if err != nil {
 		return false, errors.Wrap(err, "Error polling for CRDs")
 	}
@@ -164,7 +164,7 @@ func isAvailable(c appsv1.DeploymentCondition) bool {
 	return false
 }
 
-// DeploymentIsReady will poll the kubernetes API server to see if the velero deployment is ready to service user requests.
+// DeploymentIsReady will poll the Kubernetes API server to see if the velero deployment is ready to service user requests.
 func DeploymentIsReady(factory client.DynamicFactory, namespace string) (bool, error) {
 	gvk := schema.FromAPIVersionAndKind(appsv1.SchemeGroupVersion.String(), "Deployment")
 	apiResource := metav1.APIResource{
@@ -178,7 +178,7 @@ func DeploymentIsReady(factory client.DynamicFactory, namespace string) (bool, e
 	// declare this variable out of scope so we can return it
 	var isReady bool
 	var readyObservations int32
-	err = wait.PollImmediate(time.Second, 3*time.Minute, func() (bool, error) {
+	err = wait.PollUntilContextTimeout(context.Background(), time.Second, 3*time.Minute, true, func(ctx context.Context) (bool, error) {
 		unstructuredDeployment, err := c.Get("velero", metav1.GetOptions{})
 		if apierrors.IsNotFound(err) {
 			return false, nil
@@ -200,15 +200,14 @@ func DeploymentIsReady(factory client.DynamicFactory, namespace string) (bool, e
 		if readyObservations > 4 {
 			isReady = true
 			return true, nil
-		} else {
-			return false, nil
 		}
+		return false, nil
 	})
 	return isReady, err
 }
 
-// DaemonSetIsReady will poll the kubernetes API server to ensure the restic daemonset is ready, i.e. that
-// pods are scheduled and available on all of the the desired nodes.
+// DaemonSetIsReady will poll the Kubernetes API server to ensure the node-agent daemonset is ready, i.e. that
+// pods are scheduled and available on all of the desired nodes.
 func DaemonSetIsReady(factory client.DynamicFactory, namespace string) (bool, error) {
 	gvk := schema.FromAPIVersionAndKind(appsv1.SchemeGroupVersion.String(), "DaemonSet")
 	apiResource := metav1.APIResource{
@@ -225,8 +224,8 @@ func DaemonSetIsReady(factory client.DynamicFactory, namespace string) (bool, er
 	var isReady bool
 	var readyObservations int32
 
-	err = wait.PollImmediate(time.Second, time.Minute, func() (bool, error) {
-		unstructuredDaemonSet, err := c.Get("restic", metav1.GetOptions{})
+	err = wait.PollUntilContextTimeout(context.Background(), time.Second, time.Minute, true, func(ctx context.Context) (bool, error) {
+		unstructuredDaemonSet, err := c.Get("node-agent", metav1.GetOptions{})
 		if apierrors.IsNotFound(err) {
 			return false, nil
 		} else if err != nil {
@@ -247,14 +246,13 @@ func DaemonSetIsReady(factory client.DynamicFactory, namespace string) (bool, er
 		if readyObservations > 4 {
 			isReady = true
 			return true, nil
-		} else {
-			return false, nil
 		}
+		return false, nil
 	})
 	return isReady, err
 }
 
-// GroupResources groups resources based on whether the resources are CustomResourceDefinitions or other types of kubernetes objects
+// GroupResources groups resources based on whether the resources are CustomResourceDefinitions or other types of Kubernetes objects
 // This is useful to wait for readiness before creating CRD objects
 func GroupResources(resources *unstructured.UnstructuredList) *ResourceGroup {
 	rg := new(ResourceGroup)
@@ -341,7 +339,7 @@ func Install(dynamicFactory client.DynamicFactory, kbClient kbclient.Client, res
 	// Wait for CRDs to be ready before proceeding
 	fmt.Fprint(w, "Waiting for resources to be ready in cluster...\n")
 	_, err := crdsAreReady(kbClient, rg.CRDResources)
-	if err == wait.ErrWaitTimeout {
+	if wait.Interrupted(err) {
 		return errors.Errorf("timeout reached, CRDs not ready")
 	} else if err != nil {
 		return err

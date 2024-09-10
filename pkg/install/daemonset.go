@@ -40,22 +40,21 @@ func DaemonSet(namespace string, opts ...podTemplateOption) *appsv1.DaemonSet {
 	imageParts := strings.Split(c.image, ":")
 	if len(imageParts) == 2 && imageParts[1] != "latest" {
 		pullPolicy = corev1.PullIfNotPresent
-
 	}
 
-	resticArgs := []string{
-		"restic",
+	daemonSetArgs := []string{
+		"node-agent",
 		"server",
 	}
 	if len(c.features) > 0 {
-		resticArgs = append(resticArgs, fmt.Sprintf("--features=%s", strings.Join(c.features, ",")))
+		daemonSetArgs = append(daemonSetArgs, fmt.Sprintf("--features=%s", strings.Join(c.features, ",")))
 	}
 
 	userID := int64(0)
 	mountPropagationMode := corev1.MountPropagationHostToContainer
 
 	daemonSet := &appsv1.DaemonSet{
-		ObjectMeta: objectMeta(namespace, "restic"),
+		ObjectMeta: objectMeta(namespace, "node-agent"),
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "DaemonSet",
 			APIVersion: appsv1.SchemeGroupVersion.String(),
@@ -63,19 +62,18 @@ func DaemonSet(namespace string, opts ...podTemplateOption) *appsv1.DaemonSet {
 		Spec: appsv1.DaemonSetSpec{
 			Selector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{
-					"name": "restic",
+					"name": "node-agent",
 				},
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						"name":      "restic",
-						"component": "velero",
-					},
+					Labels: podLabels(c.labels, map[string]string{
+						"name": "node-agent",
+					}),
 					Annotations: c.annotations,
 				},
 				Spec: corev1.PodSpec{
-					ServiceAccountName: "velero",
+					ServiceAccountName: c.serviceAccountName,
 					SecurityContext: &corev1.PodSecurityContext{
 						RunAsUser: &userID,
 					},
@@ -89,6 +87,14 @@ func DaemonSet(namespace string, opts ...podTemplateOption) *appsv1.DaemonSet {
 							},
 						},
 						{
+							Name: "host-plugins",
+							VolumeSource: corev1.VolumeSource{
+								HostPath: &corev1.HostPathVolumeSource{
+									Path: "/var/lib/kubelet/plugins",
+								},
+							},
+						},
+						{
 							Name: "scratch",
 							VolumeSource: corev1.VolumeSource{
 								EmptyDir: new(corev1.EmptyDirVolumeSource),
@@ -97,18 +103,26 @@ func DaemonSet(namespace string, opts ...podTemplateOption) *appsv1.DaemonSet {
 					},
 					Containers: []corev1.Container{
 						{
-							Name:            "restic",
+							Name:            "node-agent",
 							Image:           c.image,
+							Ports:           containerPorts(),
 							ImagePullPolicy: pullPolicy,
 							Command: []string{
 								"/velero",
 							},
-							Args: resticArgs,
-
+							Args: daemonSetArgs,
+							SecurityContext: &corev1.SecurityContext{
+								Privileged: &c.privilegedNodeAgent,
+							},
 							VolumeMounts: []corev1.VolumeMount{
 								{
 									Name:             "host-pods",
 									MountPath:        "/host_pods",
+									MountPropagation: &mountPropagationMode,
+								},
+								{
+									Name:             "host-plugins",
+									MountPath:        "/var/lib/kubelet/plugins",
 									MountPropagation: &mountPropagationMode,
 								},
 								{

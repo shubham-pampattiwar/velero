@@ -9,15 +9,19 @@ reviewers:
 
   groups:
     maintainers:
-      - zubron
-      - dsu-igeek
-      - jenting
       - sseago
       - reasonerjt
       - ywk253100
+      - blackpiglet
+      - shubham-pampattiwar
+      - Lyndon-Li
+      - anshulahuja98
 
     tech-writer:
-      - a-mccarthy
+      - sseago
+      - reasonerjt
+      - ywk253100
+      - Lyndon-Li
 
 files:
   'site/**':

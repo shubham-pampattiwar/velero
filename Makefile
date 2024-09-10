@@ -22,9 +22,11 @@ PKG := github.com/vmware-tanzu/velero
 
 # Where to push the docker image.
 REGISTRY ?= velero
+GCR_REGISTRY ?= gcr.io/velero-gcp
 
 # Image name
 IMAGE ?= $(REGISTRY)/$(BIN)
+GCR_IMAGE ?= $(GCR_REGISTRY)/$(BIN)
 
 # We allow the Dockerfile to be configurable to enable the use of custom Dockerfiles
 # that pull base images from different registries.
@@ -66,11 +68,23 @@ TAG_LATEST ?= false
 
 ifeq ($(TAG_LATEST), true)
 	IMAGE_TAGS ?= $(IMAGE):$(VERSION) $(IMAGE):latest
+	GCR_IMAGE_TAGS ?= $(GCR_IMAGE):$(VERSION) $(GCR_IMAGE):latest
 else
 	IMAGE_TAGS ?= $(IMAGE):$(VERSION)
+	GCR_IMAGE_TAGS ?= $(GCR_IMAGE):$(VERSION)
 endif
 
+# check buildx is enabled
+# macOS/Windows docker cli without Docker Desktop license: https://github.com/abiosoft/colima
+# To add buildx to docker cli: https://github.com/abiosoft/colima/discussions/273#discussioncomment-2684502
 ifeq ($(shell docker buildx inspect 2>/dev/null | awk '/Status/ { print $$2 }'), running)
+	BUILDX_ENABLED ?= true
+# if emulated docker cli from podman, assume enabled
+# emulated docker cli from podman: https://podman-desktop.io/docs/migrating-from-docker/emulating-docker-cli-with-podman
+# podman known issues:
+# - on remote podman, such as on macOS,
+#   --output issue: https://github.com/containers/podman/issues/15922
+else ifeq ($(shell cat $(shell which docker) | grep -c "exec podman"), 1)
 	BUILDX_ENABLED ?= true
 else
 	BUILDX_ENABLED ?= false
@@ -82,9 +96,9 @@ see: https://velero.io/docs/main/build-from-source/#making-images-and-updating-v
 endef
 
 # The version of restic binary to be downloaded
-RESTIC_VERSION ?= 0.12.1
+RESTIC_VERSION ?= 0.15.0
 
-CLI_PLATFORMS ?= linux-amd64 linux-arm linux-arm64 darwin-amd64 windows-amd64 linux-ppc64le
+CLI_PLATFORMS ?= linux-amd64 linux-arm linux-arm64 darwin-amd64 darwin-arm64 windows-amd64 linux-ppc64le
 BUILDX_PLATFORMS ?= $(subst -,/,$(ARCH))
 BUILDX_OUTPUT_TYPE ?= docker
 
@@ -96,9 +110,6 @@ else
 	GIT_TREE_STATE ?= clean
 endif
 
-# The default linters used by lint and local-lint
-LINTERS ?= "gosec,goconst,gofmt,goimports,unparam"
-
 ###
 ### These variables should not need tweaking.
 ###
@@ -107,26 +118,29 @@ platform_temp = $(subst -, ,$(ARCH))
 GOOS = $(word 1, $(platform_temp))
 GOARCH = $(word 2, $(platform_temp))
 GOPROXY ?= https://proxy.golang.org
+GOBIN=$$(pwd)/.go/bin
 
 # If you want to build all binaries, see the 'all-build' rule.
 # If you want to build all containers, see the 'all-containers' rule.
 all:
 	@$(MAKE) build
-	@$(MAKE) build BIN=velero-restic-restore-helper
+	@$(MAKE) build BIN=velero-restore-helper
 
 build-%:
 	@$(MAKE) --no-print-directory ARCH=$* build
-	@$(MAKE) --no-print-directory ARCH=$* build BIN=velero-restic-restore-helper
+	@$(MAKE) --no-print-directory ARCH=$* build BIN=velero-restore-helper
 
 all-build: $(addprefix build-, $(CLI_PLATFORMS))
 
-all-containers: container-builder-env
+all-containers:
 	@$(MAKE) --no-print-directory container
-	@$(MAKE) --no-print-directory container BIN=velero-restic-restore-helper
+	@$(MAKE) --no-print-directory container BIN=velero-restore-helper
 
 local: build-dirs
+# Add DEBUG=1 to enable debug locally
 	GOOS=$(GOOS) \
 	GOARCH=$(GOARCH) \
+	GOBIN=$(GOBIN) \
 	VERSION=$(VERSION) \
 	REGISTRY=$(REGISTRY) \
 	PKG=$(PKG) \
@@ -143,6 +157,7 @@ _output/bin/$(GOOS)/$(GOARCH)/$(BIN): build-dirs
 	$(MAKE) shell CMD="-c '\
 		GOOS=$(GOOS) \
 		GOARCH=$(GOARCH) \
+		GOBIN=$(GOBIN) \
 		VERSION=$(VERSION) \
 		REGISTRY=$(REGISTRY) \
 		PKG=$(PKG) \
@@ -162,6 +177,7 @@ shell: build-dirs build-env
 	@# under $GOPATH).
 	@docker run \
 		-e GOFLAGS \
+		-e GOPROXY \
 		-i $(TTY) \
 		--rm \
 		-u $$(id -u):$$(id -g) \
@@ -176,20 +192,6 @@ shell: build-dirs build-env
 		$(BUILDER_IMAGE) \
 		/bin/sh $(CMD)
 
-container-builder-env:
-ifneq ($(BUILDX_ENABLED), true)
-	$(error $(BUILDX_ERROR))
-endif
-	@docker buildx build \
-	--target=builder-env \
-	--build-arg=GOPROXY=$(GOPROXY) \
-	--build-arg=PKG=$(PKG) \
-	--build-arg=VERSION=$(VERSION) \
-	--build-arg=GIT_SHA=$(GIT_SHA) \
-	--build-arg=GIT_TREE_STATE=$(GIT_TREE_STATE) \
-	--build-arg=REGISTRY=$(REGISTRY) \
-	-f $(VELERO_DOCKERFILE) .
-
 container:
 ifneq ($(BUILDX_ENABLED), true)
 	$(error $(BUILDX_ERROR))
@@ -198,6 +200,8 @@ endif
 	--output=type=$(BUILDX_OUTPUT_TYPE) \
 	--platform $(BUILDX_PLATFORMS) \
 	$(addprefix -t , $(IMAGE_TAGS)) \
+	$(addprefix -t , $(GCR_IMAGE_TAGS)) \
+	--build-arg=GOPROXY=$(GOPROXY) \
 	--build-arg=PKG=$(PKG) \
 	--build-arg=BIN=$(BIN) \
 	--build-arg=VERSION=$(VERSION) \
@@ -207,6 +211,12 @@ endif
 	--build-arg=RESTIC_VERSION=$(RESTIC_VERSION) \
 	-f $(VELERO_DOCKERFILE) .
 	@echo "container: $(IMAGE):$(VERSION)"
+ifeq ($(BUILDX_OUTPUT_TYPE)_$(REGISTRY), registry_velero)
+	docker pull $(IMAGE):$(VERSION)
+	rm -f $(BIN)-$(VERSION).tar
+	docker save $(IMAGE):$(VERSION) -o $(BIN)-$(VERSION).tar
+	gzip -f $(BIN)-$(VERSION).tar
+endif
 
 SKIP_TESTS ?=
 test: build-dirs
@@ -226,26 +236,20 @@ endif
 
 lint:
 ifneq ($(SKIP_TESTS), 1)
-	@$(MAKE) shell CMD="-c 'hack/lint.sh $(LINTERS)'"
+	@$(MAKE) shell CMD="-c 'hack/lint.sh'"
 endif
 
 local-lint:
 ifneq ($(SKIP_TESTS), 1)
-	@hack/lint.sh $(LINTERS)
-endif
-
-lint-all:
-ifneq ($(SKIP_TESTS), 1)
-	@$(MAKE) shell CMD="-c 'hack/lint.sh $(LINTERS) true'"
-endif
-
-local-lint-all:
-ifneq ($(SKIP_TESTS), 1)
-	@hack/lint.sh $(LINTERS) true
+	@hack/lint.sh
 endif
 
 update:
 	@$(MAKE) shell CMD="-c 'hack/update-all.sh'"
+
+# update-crd is for development purpose only, it is faster than update, so is a shortcut when you want to generate CRD changes only
+update-crd:
+	@$(MAKE) shell CMD="-c 'hack/update-3generated-crd-code.sh'"	
 
 build-dirs:
 	@mkdir -p _output/bin/$(GOOS)/$(GOARCH)
@@ -338,9 +342,9 @@ changelog:
 #		PUBLISH=false \
 #		make release
 #
-# To run the release, which will publish a *DRAFT* GitHub release in github.com/vmware-tanzu/velero 
+# To run the release, which will publish a *DRAFT* GitHub release in github.com/vmware-tanzu/velero
 # (you still need to review/publish the GitHub release manually):
-#		GITHUB_TOKEN=your-github-token \ 
+#		GITHUB_TOKEN=your-github-token \
 #		RELEASE_NOTES_FILE=changelogs/CHANGELOG-1.2.md \
 #		PUBLISH=true \
 #		make release
@@ -358,12 +362,37 @@ serve-docs: build-image-hugo
 	-v "$$(pwd)/site:/srv/hugo" \
 	-it -p 1313:1313 \
 	$(HUGO_IMAGE) \
-	hugo server --bind=0.0.0.0 --enableGitInfo=false
-# gen-docs generates a new versioned docs directory under site/content/docs. 
+	server --bind=0.0.0.0 --enableGitInfo=false
+# gen-docs generates a new versioned docs directory under site/content/docs.
 # Please read the documentation in the script for instructions on how to use it.
 gen-docs:
 	@hack/release-tools/gen-docs.sh
 
 .PHONY: test-e2e
 test-e2e: local
-	$(MAKE) -e VERSION=$(VERSION) -C test/e2e run
+	$(MAKE) -e VERSION=$(VERSION) -C test/ run-e2e
+
+.PHONY: test-perf
+test-perf: local
+	$(MAKE) -e VERSION=$(VERSION) -C test/ run-perf
+
+go-generate:
+	go generate ./pkg/...
+
+# requires an authenticated gh cli
+# gh: https://cli.github.com/
+# First create a PR
+# gh pr create --title 'Title name' --body 'PR body'
+# by default uses PR title as changelog body but can be overwritten like so
+# make new-changelog CHANGELOG_BODY="Changes you have made"
+new-changelog: GH_LOGIN ?= $(shell gh pr view --json author --jq .author.login 2> /dev/null)
+new-changelog: GH_PR_NUMBER ?= $(shell gh pr view --json number --jq .number 2> /dev/null)
+new-changelog: CHANGELOG_BODY ?= "$(shell gh pr view --json title --jq .title)"
+new-changelog:
+	@if [ "$(GH_LOGIN)" = "" ]; then \
+		echo "branch does not have PR or cli not logged in, try 'gh auth login' or 'gh pr create'"; \
+		exit 1; \
+	fi
+	@mkdir -p ./changelogs/unreleased/ && \
+	echo $(CHANGELOG_BODY) > ./changelogs/unreleased/$(GH_PR_NUMBER)-$(GH_LOGIN) && \
+	echo "\"$(CHANGELOG_BODY)\" added to ./changelogs/unreleased/$(GH_PR_NUMBER)-$(GH_LOGIN)"

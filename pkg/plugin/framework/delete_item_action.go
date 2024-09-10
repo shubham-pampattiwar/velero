@@ -21,24 +21,25 @@ import (
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 
+	"github.com/vmware-tanzu/velero/pkg/plugin/framework/common"
 	proto "github.com/vmware-tanzu/velero/pkg/plugin/generated"
 )
 
-// RestoreItemActionPlugin is an implementation of go-plugin's Plugin
+// DeleteItemActionPlugin is an implementation of go-plugin's Plugin
 // interface with support for gRPC for the restore/ItemAction
 // interface.
 type DeleteItemActionPlugin struct {
 	plugin.NetRPCUnsupportedPlugin
-	*pluginBase
+	*common.PluginBase
 }
 
-// GRPCClient returns a RestoreItemAction gRPC client.
+// GRPCClient returns a DeleteItemAction gRPC client.
 func (p *DeleteItemActionPlugin) GRPCClient(_ context.Context, _ *plugin.GRPCBroker, clientConn *grpc.ClientConn) (interface{}, error) {
-	return newClientDispenser(p.clientLogger, clientConn, newDeleteItemActionGRPCClient), nil
+	return common.NewClientDispenser(p.ClientLogger, clientConn, newDeleteItemActionGRPCClient), nil
 }
 
 // GRPCServer registers a DeleteItemAction gRPC server.
 func (p *DeleteItemActionPlugin) GRPCServer(_ *plugin.GRPCBroker, server *grpc.Server) error {
-	proto.RegisterDeleteItemActionServer(server, &DeleteItemActionGRPCServer{mux: p.serverMux})
+	proto.RegisterDeleteItemActionServer(server, &DeleteItemActionGRPCServer{mux: p.ServerMux})
 	return nil
 }

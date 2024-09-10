@@ -221,7 +221,7 @@ func userPriorityConfigMap() (*corev1.ConfigMap, error) {
 		return nil, errors.Wrap(err, "getting Kube client")
 	}
 
-	cm, err := kc.CoreV1().ConfigMaps("velero").Get(
+	cm, err := kc.CoreV1().ConfigMaps(fc.Namespace()).Get(
 		context.Background(),
 		"enableapigroupversions",
 		metav1.GetOptions{},
@@ -339,7 +339,7 @@ func findSupportedUserVersion(userGVs, targetGVs, sourceGVs []metav1.GroupVersio
 	return ""
 }
 
-// versionsContain will check if a version can be found in a a slice of versions.
+// versionsContain will check if a version can be found in a slice of versions.
 func versionsContain(list []metav1.GroupVersionForDiscovery, version string) bool {
 	for _, v := range list {
 		if v.Version == version {

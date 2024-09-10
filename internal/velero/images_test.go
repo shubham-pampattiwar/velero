@@ -128,13 +128,12 @@ func testDefaultImage(t *testing.T, defaultImageFn func() string, imageName stri
 			assert.Equal(t, tc.want, defaultImageFn())
 		})
 	}
-
 }
 
 func TestDefaultVeleroImage(t *testing.T) {
 	testDefaultImage(t, DefaultVeleroImage, "velero")
 }
 
-func TestDefaultResticRestoreHelperImage(t *testing.T) {
-	testDefaultImage(t, DefaultResticRestoreHelperImage, "velero-restic-restore-helper")
+func TestDefaultRestoreHelperImage(t *testing.T) {
+	testDefaultImage(t, DefaultRestoreHelperImage, "velero-restore-helper")
 }

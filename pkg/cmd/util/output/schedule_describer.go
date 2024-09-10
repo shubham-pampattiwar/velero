@@ -43,6 +43,16 @@ func DescribeSchedule(schedule *v1.Schedule) string {
 		}
 		d.Printf("Phase:\t%s\n", phaseString)
 
+		if schedule.Spec.Template.ResourcePolicy != nil {
+			d.Println()
+			DescribeResourcePolicies(d, schedule.Spec.Template.ResourcePolicy)
+		}
+
+		if schedule.Spec.Template.UploaderConfig != nil && schedule.Spec.Template.UploaderConfig.ParallelFilesUpload > 0 {
+			d.Println()
+			DescribeUploaderConfigForBackup(d, schedule.Spec.Template)
+		}
+
 		status := schedule.Status
 		if len(status.ValidationErrors) > 0 {
 			d.Println()
@@ -51,6 +61,9 @@ func DescribeSchedule(schedule *v1.Schedule) string {
 				d.Printf("\t%s\n", color.RedString(ve))
 			}
 		}
+
+		d.Println()
+		d.Printf("Paused:\t%t\n", schedule.Spec.Paused)
 
 		d.Println()
 		DescribeScheduleSpec(d, schedule.Spec)

@@ -11,50 +11,72 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-FROM --platform=$BUILDPLATFORM golang:1.16 as builder-env
+
+# Velero binary build section
+FROM --platform=$BUILDPLATFORM golang:1.22-bookworm as velero-builder
 
 ARG GOPROXY
+ARG BIN
 ARG PKG
 ARG VERSION
+ARG REGISTRY
 ARG GIT_SHA
 ARG GIT_TREE_STATE
-ARG REGISTRY
+ARG TARGETOS
+ARG TARGETARCH
+ARG TARGETVARIANT
 
 ENV CGO_ENABLED=0 \
     GO111MODULE=on \
     GOPROXY=${GOPROXY} \
+    GOOS=${TARGETOS} \
+    GOARCH=${TARGETARCH} \
+    GOARM=${TARGETVARIANT} \
     LDFLAGS="-X ${PKG}/pkg/buildinfo.Version=${VERSION} -X ${PKG}/pkg/buildinfo.GitSHA=${GIT_SHA} -X ${PKG}/pkg/buildinfo.GitTreeState=${GIT_TREE_STATE} -X ${PKG}/pkg/buildinfo.ImageRegistry=${REGISTRY}"
 
 WORKDIR /go/src/github.com/vmware-tanzu/velero
 
 COPY . /go/src/github.com/vmware-tanzu/velero
 
-RUN apt-get update && apt-get install -y bzip2
+RUN mkdir -p /output/usr/bin && \
+    export GOARM=$( echo "${GOARM}" | cut -c2-) && \
+    go build -o /output/${BIN} \
+    -ldflags "${LDFLAGS}" ${PKG}/cmd/${BIN} && \
+    go build -o /output/velero-helper \
+    -ldflags "${LDFLAGS}" ${PKG}/cmd/velero-helper && \
+    go clean -modcache -cache
 
-FROM --platform=$BUILDPLATFORM builder-env as builder
+# Restic binary build section
+FROM --platform=$BUILDPLATFORM golang:1.22-bookworm as restic-builder
 
+ARG BIN
 ARG TARGETOS
 ARG TARGETARCH
 ARG TARGETVARIANT
-ARG PKG
-ARG BIN
 ARG RESTIC_VERSION
 
-ENV GOOS=${TARGETOS} \
+ENV CGO_ENABLED=0 \
+    GO111MODULE=on \
+    GOPROXY=${GOPROXY} \
+    GOOS=${TARGETOS} \
     GOARCH=${TARGETARCH} \
     GOARM=${TARGETVARIANT}
 
+COPY . /go/src/github.com/vmware-tanzu/velero
+
 RUN mkdir -p /output/usr/bin && \
-    bash ./hack/download-restic.sh && \
-    export GOARM=$( echo "${GOARM}" | cut -c2-) && \
-    go build -o /output/${BIN} \
-    -ldflags "${LDFLAGS}" ${PKG}/cmd/${BIN}
+    export GOARM=$(echo "${GOARM}" | cut -c2-) && \
+    /go/src/github.com/vmware-tanzu/velero/hack/build-restic.sh && \
+    go clean -modcache -cache
 
-FROM gcr.io/distroless/base-debian10:nonroot
+# Velero image packing section
+FROM paketobuildpacks/run-jammy-tiny:latest
 
-LABEL maintainer="Nolan Brubaker <brubakern@vmware.com>"
+LABEL maintainer="Xun Jiang <jxun@vmware.com>"
 
-COPY --from=builder /output /
+COPY --from=velero-builder /output /
 
-USER nonroot:nonroot
+COPY --from=restic-builder /output /
+
+USER cnb:cnb
 

@@ -17,6 +17,7 @@ limitations under the License.
 package kube
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	storagev1api "k8s.io/api/storage/v1"
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apiextv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -32,11 +34,11 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	kubeinformers "k8s.io/client-go/informers"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/vmware-tanzu/velero/pkg/builder"
-	"github.com/vmware-tanzu/velero/pkg/test"
 	velerotest "github.com/vmware-tanzu/velero/pkg/test"
+	"github.com/vmware-tanzu/velero/pkg/uploader"
 )
 
 func TestNamespaceAndName(t *testing.T) {
@@ -136,22 +138,6 @@ func TestEnsureNamespaceExistsAndIsReady(t *testing.T) {
 			assert.Equal(t, test.expectedCreatedResult, nsCreated)
 		})
 	}
-
-}
-
-type harness struct {
-	*test.APIServer
-
-	log logrus.FieldLogger
-}
-
-func newHarness(t *testing.T) *harness {
-	t.Helper()
-
-	return &harness{
-		APIServer: test.NewAPIServer(t),
-		log:       logrus.StandardLogger(),
-	}
 }
 
 // TestGetVolumeDirectorySuccess tests that the GetVolumeDirectory function
@@ -179,6 +165,13 @@ func TestGetVolumeDirectorySuccess(t *testing.T) {
 			want: "a-pv/mount",
 		},
 		{
+			name: "Block CSI volume with a PVC/PV does not append '/mount' to the volume name",
+			pod:  builder.ForPod("ns-1", "my-pod").Volumes(builder.ForVolume("my-vol").PersistentVolumeClaimSource("my-pvc").Result()).Result(),
+			pvc:  builder.ForPersistentVolumeClaim("ns-1", "my-pvc").VolumeName("a-pv").Result(),
+			pv:   builder.ForPersistentVolume("a-pv").CSI("csi.test.com", "provider-volume-id").VolumeMode(corev1.PersistentVolumeBlock).Result(),
+			want: "a-pv",
+		},
+		{
 			name: "CSI volume mounted without a PVC appends '/mount' to the volume name",
 			pod:  builder.ForPod("ns-1", "my-pod").Volumes(builder.ForVolume("my-vol").CSISource("csi.test.com").Result()).Result(),
 			want: "my-vol/mount",
@@ -188,26 +181,88 @@ func TestGetVolumeDirectorySuccess(t *testing.T) {
 			pod:  builder.ForPod("ns-1", "my-pod").Volumes(builder.ForVolume("my-vol").Result()).Result(),
 			want: "my-vol",
 		},
+		{
+			name: "Volume with CSI annotation appends '/mount' to the volume name",
+			pod:  builder.ForPod("ns-1", "my-pod").Volumes(builder.ForVolume("my-vol").PersistentVolumeClaimSource("my-pvc").Result()).Result(),
+			pvc:  builder.ForPersistentVolumeClaim("ns-1", "my-pvc").VolumeName("a-pv").Result(),
+			pv:   builder.ForPersistentVolume("a-pv").ObjectMeta(builder.WithAnnotations(KubeAnnDynamicallyProvisioned, "csi.test.com")).Result(),
+			want: "a-pv/mount",
+		},
+		{
+			name: "Volume with CSI annotation 'pv.kubernetes.io/migrated-to' appends '/mount' to the volume name",
+			pod:  builder.ForPod("ns-1", "my-pod").Volumes(builder.ForVolume("my-vol").PersistentVolumeClaimSource("my-pvc").Result()).Result(),
+			pvc:  builder.ForPersistentVolumeClaim("ns-1", "my-pvc").VolumeName("a-pv").Result(),
+			pv:   builder.ForPersistentVolume("a-pv").ObjectMeta(builder.WithAnnotations(KubeAnnMigratedTo, "csi.test.com")).Result(),
+			want: "a-pv/mount",
+		},
 	}
 
+	csiDriver := storagev1api.CSIDriver{
+		ObjectMeta: metav1.ObjectMeta{Name: "csi.test.com"},
+	}
 	for _, tc := range tests {
-		h := newHarness(t)
-
-		pvcInformer := kubeinformers.NewSharedInformerFactoryWithOptions(h.KubeClient, 0, kubeinformers.WithNamespace("ns-1")).Core().V1().PersistentVolumeClaims()
-		pvInformer := kubeinformers.NewSharedInformerFactory(h.KubeClient, 0).Core().V1().PersistentVolumes()
+		clientBuilder := fake.NewClientBuilder().WithLists(&storagev1api.CSIDriverList{Items: []storagev1api.CSIDriver{csiDriver}})
 
 		if tc.pvc != nil {
-			require.NoError(t, pvcInformer.Informer().GetStore().Add(tc.pvc))
+			clientBuilder = clientBuilder.WithObjects(tc.pvc)
 		}
 		if tc.pv != nil {
-			require.NoError(t, pvInformer.Informer().GetStore().Add(tc.pv))
+			clientBuilder = clientBuilder.WithObjects(tc.pv)
 		}
 
 		// Function under test
-		dir, err := GetVolumeDirectory(tc.pod, tc.pod.Spec.Volumes[0].Name, pvcInformer.Lister(), pvInformer.Lister())
+		dir, err := GetVolumeDirectory(context.Background(), logrus.StandardLogger(), tc.pod, tc.pod.Spec.Volumes[0].Name, clientBuilder.Build())
 
 		require.NoError(t, err)
 		assert.Equal(t, tc.want, dir)
+	}
+}
+
+// TestGetVolumeModeSuccess tests the GetVolumeMode function
+func TestGetVolumeModeSuccess(t *testing.T) {
+	tests := []struct {
+		name string
+		pod  *corev1.Pod
+		pvc  *corev1.PersistentVolumeClaim
+		pv   *corev1.PersistentVolume
+		want uploader.PersistentVolumeMode
+	}{
+		{
+			name: "Filesystem PVC volume",
+			pod:  builder.ForPod("ns-1", "my-pod").Volumes(builder.ForVolume("my-vol").PersistentVolumeClaimSource("my-pvc").Result()).Result(),
+			pvc:  builder.ForPersistentVolumeClaim("ns-1", "my-pvc").VolumeName("a-pv").Result(),
+			pv:   builder.ForPersistentVolume("a-pv").VolumeMode(corev1.PersistentVolumeFilesystem).Result(),
+			want: uploader.PersistentVolumeFilesystem,
+		},
+		{
+			name: "Block PVC volume",
+			pod:  builder.ForPod("ns-1", "my-pod").Volumes(builder.ForVolume("my-vol").PersistentVolumeClaimSource("my-pvc").Result()).Result(),
+			pvc:  builder.ForPersistentVolumeClaim("ns-1", "my-pvc").VolumeName("a-pv").Result(),
+			pv:   builder.ForPersistentVolume("a-pv").VolumeMode(corev1.PersistentVolumeBlock).Result(),
+			want: uploader.PersistentVolumeBlock,
+		},
+		{
+			name: "Pod volume without a PVC",
+			pod:  builder.ForPod("ns-1", "my-pod").Volumes(builder.ForVolume("my-vol").Result()).Result(),
+			want: uploader.PersistentVolumeFilesystem,
+		},
+	}
+
+	for _, tc := range tests {
+		clientBuilder := fake.NewClientBuilder()
+
+		if tc.pvc != nil {
+			clientBuilder = clientBuilder.WithObjects(tc.pvc)
+		}
+		if tc.pv != nil {
+			clientBuilder = clientBuilder.WithObjects(tc.pv)
+		}
+
+		// Function under test
+		mode, err := GetVolumeMode(context.Background(), logrus.StandardLogger(), tc.pod, tc.pod.Spec.Volumes[0].Name, clientBuilder.Build())
+
+		require.NoError(t, err)
+		assert.Equal(t, tc.want, mode)
 	}
 }
 
@@ -414,5 +469,199 @@ func TestIsCRDReady(t *testing.T) {
 	err := json.Unmarshal(resBytes, obj)
 	require.NoError(t, err)
 	_, err = IsCRDReady(obj)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
+}
+
+func TestSinglePathMatch(t *testing.T) {
+	fakeFS := velerotest.NewFakeFileSystem()
+	fakeFS.MkdirAll("testDir1/subpath", 0755)
+	fakeFS.MkdirAll("testDir2/subpath", 0755)
+
+	_, err := SinglePathMatch("./*/subpath", fakeFS, logrus.StandardLogger())
+	assert.Error(t, err)
+	require.ErrorContains(t, err, "expected one matching path")
+}
+
+func TestAddAnnotations(t *testing.T) {
+	annotationValues := map[string]string{
+		"k1": "v1",
+		"k2": "v2",
+		"k3": "v3",
+		"k4": "v4",
+		"k5": "v5",
+	}
+	testCases := []struct {
+		name  string
+		o     metav1.ObjectMeta
+		toAdd map[string]string
+	}{
+		{
+			name: "should create a new annotation map when annotation is nil",
+			o: metav1.ObjectMeta{
+				Annotations: nil,
+			},
+			toAdd: annotationValues,
+		},
+		{
+			name: "should add all supplied annotations into empty annotation",
+			o: metav1.ObjectMeta{
+				Annotations: map[string]string{},
+			},
+			toAdd: annotationValues,
+		},
+		{
+			name: "should add all supplied annotations to existing annotation",
+			o: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					"k100": "v100",
+					"k200": "v200",
+					"k300": "v300",
+				},
+			},
+			toAdd: annotationValues,
+		},
+		{
+			name: "should overwrite some existing annotations",
+			o: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					"k100": "v100",
+					"k2":   "v200",
+					"k300": "v300",
+				},
+			},
+			toAdd: annotationValues,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			AddAnnotations(&tc.o, tc.toAdd)
+			for k, v := range tc.toAdd {
+				actual, exists := tc.o.Annotations[k]
+				assert.True(t, exists)
+				assert.Equal(t, v, actual)
+			}
+		})
+	}
+}
+
+func TestAddLabels(t *testing.T) {
+	labelValues := map[string]string{
+		"l1": "v1",
+		"l2": "v2",
+		"l3": "v3",
+		"l4": "v4",
+		"l5": "v5",
+	}
+	testCases := []struct {
+		name  string
+		o     metav1.ObjectMeta
+		toAdd map[string]string
+	}{
+		{
+			name: "should create a new labels map when labels is nil",
+			o: metav1.ObjectMeta{
+				Labels: nil,
+			},
+			toAdd: labelValues,
+		},
+		{
+			name: "should add all supplied labels into empty labels",
+			o: metav1.ObjectMeta{
+				Labels: map[string]string{},
+			},
+			toAdd: labelValues,
+		},
+		{
+			name: "should add all supplied labels to existing labels",
+			o: metav1.ObjectMeta{
+				Labels: map[string]string{
+					"l100": "v100",
+					"l200": "v200",
+					"l300": "v300",
+				},
+			},
+			toAdd: labelValues,
+		},
+		{
+			name: "should overwrite some existing labels",
+			o: metav1.ObjectMeta{
+				Labels: map[string]string{
+					"l100": "v100",
+					"l2":   "v200",
+					"l300": "v300",
+				},
+			},
+			toAdd: labelValues,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			AddLabels(&tc.o, tc.toAdd)
+			for k, v := range tc.toAdd {
+				actual, exists := tc.o.Labels[k]
+				assert.True(t, exists)
+				assert.Equal(t, v, actual)
+			}
+		})
+	}
+}
+
+func TestHasBackupLabel(t *testing.T) {
+	testCases := []struct {
+		name       string
+		o          metav1.ObjectMeta
+		backupName string
+		expected   bool
+	}{
+		{
+			name:     "object has no labels",
+			o:        metav1.ObjectMeta{},
+			expected: false,
+		},
+		{
+			name:       "object has no velero backup label",
+			backupName: "csi-b1",
+			o: metav1.ObjectMeta{
+				Labels: map[string]string{
+					"l100": "v100",
+					"l2":   "v200",
+					"l300": "v300",
+				},
+			},
+			expected: false,
+		},
+		{
+			name:       "object has velero backup label but value not equal to backup name",
+			backupName: "csi-b1",
+			o: metav1.ObjectMeta{
+				Labels: map[string]string{
+					"velero.io/backup-name": "does-not-match",
+					"l100":                  "v100",
+					"l2":                    "v200",
+					"l300":                  "v300",
+				},
+			},
+			expected: false,
+		},
+		{
+			name:       "object has backup label with matching backup name value",
+			backupName: "does-match",
+			o: metav1.ObjectMeta{
+				Labels: map[string]string{
+					"velero.io/backup-name": "does-match",
+					"l100":                  "v100",
+					"l2":                    "v200",
+					"l300":                  "v300",
+				},
+			},
+			expected: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		actual := HasBackupLabel(&tc.o, tc.backupName)
+		assert.Equal(t, tc.expected, actual)
+	}
 }

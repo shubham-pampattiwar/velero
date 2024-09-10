@@ -117,14 +117,6 @@ func setMapEntries(m map[string]string, vals ...string) map[string]string {
 	return m
 }
 
-// WithClusterName is a functional option that applies the specified
-// cluster name to an object.
-func WithClusterName(val string) func(obj metav1.Object) {
-	return func(obj metav1.Object) {
-		obj.SetClusterName(val)
-	}
-}
-
 // WithFinalizers is a functional option that applies the specified
 // finalizers to an object.
 func WithFinalizers(vals ...string) func(obj metav1.Object) {
@@ -152,5 +144,26 @@ func WithUID(val string) func(obj metav1.Object) {
 func WithGenerateName(val string) func(obj metav1.Object) {
 	return func(obj metav1.Object) {
 		obj.SetGenerateName(val)
+	}
+}
+
+// WithManagedFields is a functional option that applies the specified managed fields to an object.
+func WithManagedFields(val []metav1.ManagedFieldsEntry) func(obj metav1.Object) {
+	return func(obj metav1.Object) {
+		obj.SetManagedFields(val)
+	}
+}
+
+// WithCreationTimestamp is a functional option that applies the specified creationTimestamp
+func WithCreationTimestamp(t time.Time) func(obj metav1.Object) {
+	return func(obj metav1.Object) {
+		obj.SetCreationTimestamp(metav1.Time{Time: t})
+	}
+}
+
+// WithOwnerReference is a functional option that applies the specified OwnerReference to an object.
+func WithOwnerReference(val []metav1.OwnerReference) func(obj metav1.Object) {
+	return func(obj metav1.Object) {
+		obj.SetOwnerReferences(val)
 	}
 }

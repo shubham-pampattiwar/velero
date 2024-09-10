@@ -20,14 +20,12 @@ import (
 	"context"
 	"time"
 
-	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/ginkgo/extensions/table"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/clock"
 	"k8s.io/client-go/kubernetes/scheme"
-
+	testclocks "k8s.io/utils/clock/testing"
 	ctrl "sigs.k8s.io/controller-runtime"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -36,6 +34,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/builder"
 	"github.com/vmware-tanzu/velero/pkg/buildinfo"
 	"github.com/vmware-tanzu/velero/pkg/plugin/framework"
+	"github.com/vmware-tanzu/velero/pkg/plugin/framework/common"
 	velerotest "github.com/vmware-tanzu/velero/pkg/test"
 )
 
@@ -55,22 +54,22 @@ var _ = Describe("Server Status Request Reconciler", func() {
 	// `now` will be used to set the fake clock's time; capture
 	// it here so it can be referenced in the test case defs.
 	now, err := time.Parse(time.RFC1123, time.RFC1123)
-	Expect(err).To(BeNil())
+	Expect(err).ToNot(HaveOccurred())
 	now = now.Local()
 
 	DescribeTable("a Server Status request",
 		func(test request) {
 			// Setup reconciler
 			Expect(velerov1api.AddToScheme(scheme.Scheme)).To(Succeed())
-			r := ServerStatusRequestReconciler{
-				Client:         fake.NewFakeClientWithScheme(scheme.Scheme, test.req),
-				Ctx:            context.Background(),
-				PluginRegistry: test.reqPluginLister,
-				Clock:          clock.NewFakeClock(now),
-				Log:            velerotest.NewLogger(),
-			}
+			r := NewServerStatusRequestReconciler(
+				context.Background(),
+				fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(test.req).Build(),
+				test.reqPluginLister,
+				testclocks.NewFakeClock(now),
+				velerotest.NewLogger(),
+			)
 
-			actualResult, err := r.Reconcile(r.Ctx, ctrl.Request{
+			actualResult, err := r.Reconcile(r.ctx, ctrl.Request{
 				NamespacedName: types.NamespacedName{
 					Namespace: velerov1api.DefaultNamespace,
 					Name:      test.req.Name,
@@ -79,20 +78,20 @@ var _ = Describe("Server Status Request Reconciler", func() {
 
 			Expect(actualResult).To(BeEquivalentTo(test.expectedRequeue))
 			if test.expectedErrMsg == "" {
-				Expect(err).To(BeNil())
+				Expect(err).ToNot(HaveOccurred())
 			} else {
 				Expect(err.Error()).To(BeEquivalentTo(test.expectedErrMsg))
 				return
 			}
 
 			instance := &velerov1api.ServerStatusRequest{}
-			err = r.Client.Get(ctx, kbclient.ObjectKey{Name: test.req.Name, Namespace: test.req.Namespace}, instance)
+			err = r.client.Get(ctx, kbclient.ObjectKey{Name: test.req.Name, Namespace: test.req.Namespace}, instance)
 
 			// Assertions
 			if test.expected == nil {
 				Expect(apierrors.IsNotFound(err)).To(BeTrue())
 			} else {
-				Expect(err).To(BeNil())
+				Expect(err).ToNot(HaveOccurred())
 				Eventually(instance.Status.Phase == test.expected.Status.Phase, timeout).Should(BeTrue())
 			}
 		},
@@ -247,7 +246,7 @@ type fakePluginLister struct {
 	plugins []framework.PluginIdentifier
 }
 
-func (l *fakePluginLister) List(kind framework.PluginKind) []framework.PluginIdentifier {
+func (l *fakePluginLister) List(kind common.PluginKind) []framework.PluginIdentifier {
 	var plugins []framework.PluginIdentifier
 	for _, plugin := range l.plugins {
 		if plugin.Kind == kind {

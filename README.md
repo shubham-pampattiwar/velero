@@ -35,8 +35,7 @@ If you encounter issues, review the [troubleshooting docs][30], [file an issue][
 Velero is an open community and we welcome your participation. The best way to get involved is to join our bi-weekly community meetings:
 
 * Join the [Velero community meetings](https://velero.io/community/), held bi-weekly, alternating between Beijing-friendly and US/Europe-friendly time zones.
-* Subscribe to the [project meeting calendar](https://zoom-lfx.platform.linuxfoundation.org/meetings/velero?view=week).
-* Watch previous meetings on our [YouTube channel](https://www.youtube.com/playlist?list=PL7bmigfV0EqQRysvqvqOtRNk4L5S7uqwM).
+* Subscribe to the [project meeting calendar](https://zoom-lfx.platform.linuxfoundation.org/meetings/velero?view=week). Recordings, transcripts, and AI summaries of past meetings are available by opening the individual meeting events on the calendar.
 * Chat with us on the [Kubernetes Slack][25] `#velero` channel and join the [mailing list][24].
 
 See the [community page](https://velero.io/community/) for the full schedule and details.

@@ -48,9 +48,27 @@ func TestGenerateVolumeInfoForSkippedVolume(t *testing.T) {
 	tests := []struct {
 		name                string
 		skippedVolumeName   string
+		skippedPVCName      string
+		skippedPVCNamespace string
 		pvMap               map[string]pvcPvInfo
 		expectedVolumeInfos []*BackupVolumeInfo
 	}{
+		{
+			name:                "Skipped volume with empty PV name but with PVC info",
+			skippedVolumeName:   "",
+			skippedPVCName:      "testPVC",
+			skippedPVCNamespace: "velero",
+			pvMap:               map[string]pvcPvInfo{},
+			expectedVolumeInfos: []*BackupVolumeInfo{
+				{
+					PVName:        "",
+					PVCName:       "testPVC",
+					PVCNamespace:  "velero",
+					Skipped:       true,
+					SkippedReason: "CSI: skipped for PodVolumeBackup",
+				},
+			},
+		},
 		{
 			name:              "Cannot find info for PV",
 			skippedVolumeName: "testPV",
@@ -131,11 +149,13 @@ func TestGenerateVolumeInfoForSkippedVolume(t *testing.T) {
 			volumesInfo := BackupVolumesInformation{}
 			volumesInfo.Init()
 
-			if tc.skippedVolumeName != "" {
+			if tc.skippedVolumeName != "" || tc.skippedPVCName != "" {
 				volumesInfo.SkippedVolumes = []SkippedVolume{
 					{
-						PVName:  tc.skippedVolumeName,
-						Reasons: "CSI: skipped for PodVolumeBackup",
+						PVName:       tc.skippedVolumeName,
+						PVCName:      tc.skippedPVCName,
+						PVCNamespace: tc.skippedPVCNamespace,
+						Reasons:      "CSI: skipped for PodVolumeBackup",
 					},
 				}
 			}

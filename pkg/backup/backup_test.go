@@ -5633,10 +5633,10 @@ func TestBackupWithResourcePolicyNamespaceLabelSelector(t *testing.T) {
 
 	h := newHarness(t, itemBlockPool)
 	req := &Request{
-		Backup:           backup,
-		SkippedPVTracker: NewSkipPVTracker(),
-		BackedUpItems:    NewBackedUpItemsMap(),
-		WorkerPool:       itemBlockPool,
+		Backup:               backup,
+		SkippedVolumeTracker: NewSkipVolumeTracker(),
+		BackedUpItems:        NewBackedUpItemsMap(),
+		WorkerPool:           itemBlockPool,
 	}
 	backupFile := bytes.NewBuffer([]byte{})
 
@@ -5681,10 +5681,10 @@ func TestBackupResourcePolicyNamespaceLabelSelectorEdgeCases(t *testing.T) {
 
 		h := newHarness(t, itemBlockPool)
 		req := &Request{
-			Backup:           backup,
-			SkippedPVTracker: NewSkipPVTracker(),
-			BackedUpItems:    NewBackedUpItemsMap(),
-			WorkerPool:       itemBlockPool,
+			Backup:               backup,
+			SkippedVolumeTracker: NewSkipVolumeTracker(),
+			BackedUpItems:        NewBackedUpItemsMap(),
+			WorkerPool:           itemBlockPool,
 		}
 		backupFile := bytes.NewBuffer([]byte{})
 

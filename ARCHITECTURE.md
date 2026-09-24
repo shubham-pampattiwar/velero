@@ -6,7 +6,7 @@ place and do not drift.
 
 ## How Velero works
 
-Velero runs a server (a set of controllers) in your cluster and a command-line
+Velero runs a server (a set of controllers) as a single replica deployment in your cluster and a command-line
 client that runs locally. Backups and restores are driven by Kubernetes custom
 resources and reconciled by the server. Volume data is moved by the built-in
 file-system backup and by the data mover, and object and volume snapshot

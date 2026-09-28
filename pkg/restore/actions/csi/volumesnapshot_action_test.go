@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"testing"
 
-	volumegroupsnapshotv1beta2 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1beta2"
+	volumegroupsnapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
@@ -268,7 +268,7 @@ func TestEnsureStubVGSCExists(t *testing.T) {
 		name           string
 		vs             *snapshotv1api.VolumeSnapshot
 		restore        *velerov1api.Restore
-		existingVGSC   *volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent
+		existingVGSC   *volumegroupsnapshotv1.VolumeGroupSnapshotContent
 		expectVGSC     bool
 		expectErr      bool
 		expectedHandle string
@@ -353,15 +353,15 @@ func TestEnsureStubVGSCExists(t *testing.T) {
 				},
 			},
 			restore: builder.ForRestore("velero", "restore").ObjectMeta(builder.WithUID("restore-uid")).Result(),
-			existingVGSC: &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent{
+			existingVGSC: &volumegroupsnapshotv1.VolumeGroupSnapshotContent{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: util.GenerateSha256FromRestoreUIDAndVsName("restore-uid", testVGSHandle),
 				},
-				Spec: volumegroupsnapshotv1beta2.VolumeGroupSnapshotContentSpec{
+				Spec: volumegroupsnapshotv1.VolumeGroupSnapshotContentSpec{
 					Driver:         testDriver,
 					DeletionPolicy: snapshotv1api.VolumeSnapshotContentRetain,
-					Source: volumegroupsnapshotv1beta2.VolumeGroupSnapshotContentSource{
-						GroupSnapshotHandles: &volumegroupsnapshotv1beta2.GroupSnapshotHandles{
+					Source: volumegroupsnapshotv1.VolumeGroupSnapshotContentSource{
+						GroupSnapshotHandles: &volumegroupsnapshotv1.GroupSnapshotHandles{
 							VolumeGroupSnapshotHandle: testVGSHandle,
 							VolumeSnapshotHandles:     []string{testSnapshotHandle},
 						},
@@ -398,7 +398,7 @@ func TestEnsureStubVGSCExists(t *testing.T) {
 
 			// Check if VGSC was created/updated
 			vgscName := util.GenerateSha256FromRestoreUIDAndVsName(string(tc.restore.UID), tc.vs.Annotations[velerov1api.VolumeGroupSnapshotHandleAnnotation])
-			vgsc := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent{}
+			vgsc := &volumegroupsnapshotv1.VolumeGroupSnapshotContent{}
 			getErr := crClient.Get(context.Background(), crclient.ObjectKey{Name: vgscName}, vgsc)
 
 			if tc.expectVGSC {
@@ -456,23 +456,23 @@ func TestAddSnapshotHandleToVGSC(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			crClient := velerotest.NewFakeControllerRuntimeClient(t)
 
-			var source volumegroupsnapshotv1beta2.VolumeGroupSnapshotContentSource
+			var source volumegroupsnapshotv1.VolumeGroupSnapshotContentSource
 			if tc.nilGroupSnapshotHandles {
-				source = volumegroupsnapshotv1beta2.VolumeGroupSnapshotContentSource{}
+				source = volumegroupsnapshotv1.VolumeGroupSnapshotContentSource{}
 			} else {
-				source = volumegroupsnapshotv1beta2.VolumeGroupSnapshotContentSource{
-					GroupSnapshotHandles: &volumegroupsnapshotv1beta2.GroupSnapshotHandles{
+				source = volumegroupsnapshotv1.VolumeGroupSnapshotContentSource{
+					GroupSnapshotHandles: &volumegroupsnapshotv1.GroupSnapshotHandles{
 						VolumeGroupSnapshotHandle: testVGSHandle,
 						VolumeSnapshotHandles:     tc.existingHandles,
 					},
 				}
 			}
 
-			existingVGSC := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent{
+			existingVGSC := &volumegroupsnapshotv1.VolumeGroupSnapshotContent{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-vgsc",
 				},
-				Spec: volumegroupsnapshotv1beta2.VolumeGroupSnapshotContentSpec{
+				Spec: volumegroupsnapshotv1.VolumeGroupSnapshotContentSpec{
 					Driver:         testDriver,
 					DeletionPolicy: snapshotv1api.VolumeSnapshotContentRetain,
 					Source:         source,
@@ -481,7 +481,7 @@ func TestAddSnapshotHandleToVGSC(t *testing.T) {
 			require.NoError(t, crClient.Create(context.Background(), existingVGSC))
 
 			// Re-fetch to get the created object with proper metadata
-			fetchedVGSC := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent{}
+			fetchedVGSC := &volumegroupsnapshotv1.VolumeGroupSnapshotContent{}
 			require.NoError(t, crClient.Get(context.Background(), crclient.ObjectKey{Name: "test-vgsc"}, fetchedVGSC))
 
 			p := &volumeSnapshotRestoreItemAction{
@@ -493,7 +493,7 @@ func TestAddSnapshotHandleToVGSC(t *testing.T) {
 			require.NoError(t, err)
 
 			// Verify the VGSC has expected handles
-			updatedVGSC := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent{}
+			updatedVGSC := &volumegroupsnapshotv1.VolumeGroupSnapshotContent{}
 			require.NoError(t, crClient.Get(context.Background(), crclient.ObjectKey{Name: "test-vgsc"}, updatedVGSC))
 			require.ElementsMatch(t, tc.expectedHandles, updatedVGSC.Spec.Source.GroupSnapshotHandles.VolumeSnapshotHandles)
 		})

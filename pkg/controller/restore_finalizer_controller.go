@@ -26,7 +26,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	volumegroupsnapshotv1beta2 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1beta2"
+	volumegroupsnapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
@@ -496,7 +496,7 @@ func (ctx *finalizerContext) hasVolumeGroupSnapshotHandles() bool {
 func (ctx *finalizerContext) cleanupStubVGSC() (warnings results.Result) {
 	ctx.logger.Info("cleaning up stub VolumeGroupSnapshotContents")
 
-	vgscList := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContentList{}
+	vgscList := &volumegroupsnapshotv1.VolumeGroupSnapshotContentList{}
 	err := ctx.crClient.List(
 		context.Background(),
 		vgscList,

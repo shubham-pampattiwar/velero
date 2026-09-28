@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	volumegroupsnapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
@@ -35,6 +34,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/utils/clock"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -51,6 +52,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/plugin/clientmgmt"
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
 	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
+	csiutil "github.com/vmware-tanzu/velero/pkg/util/csi"
 	kubeutil "github.com/vmware-tanzu/velero/pkg/util/kube"
 	"github.com/vmware-tanzu/velero/pkg/util/results"
 )
@@ -64,6 +66,7 @@ type restoreFinalizerReconciler struct {
 	metrics           *metrics.ServerMetrics
 	clock             clock.WithTickerAndDelayedExecution
 	crClient          client.Client
+	vgsClient         *csiutil.VGSClient
 	multiHookTracker  *hook.MultiHookTracker
 	resourceTimeout   time.Duration
 }
@@ -76,6 +79,8 @@ func NewRestoreFinalizerReconciler(
 	backupStoreGetter persistence.ObjectBackupStoreGetter,
 	metrics *metrics.ServerMetrics,
 	crClient client.Client,
+	dynamicClient dynamic.Interface,
+	discoveryClient discovery.DiscoveryInterface,
 	multiHookTracker *hook.MultiHookTracker,
 	resourceTimeout time.Duration,
 ) *restoreFinalizerReconciler {
@@ -88,6 +93,7 @@ func NewRestoreFinalizerReconciler(
 		metrics:           metrics,
 		clock:             &clock.RealClock{},
 		crClient:          crClient,
+		vgsClient:         csiutil.NewVGSClient(dynamicClient, discoveryClient, logger),
 		multiHookTracker:  multiHookTracker,
 		resourceTimeout:   resourceTimeout,
 	}
@@ -183,6 +189,7 @@ func (r *restoreFinalizerReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		backupStore:        backupStore,
 		restore:            restore,
 		crClient:           r.crClient,
+		vgsClient:          r.vgsClient,
 		backupVolumeInfos:  backupVolumeInfos,
 		restoreVolumeInfos: restoreVolumeInfos,
 		restoredPVCList:    restoredPVCList,
@@ -300,6 +307,7 @@ type finalizerContext struct {
 	logger                   logrus.FieldLogger
 	restore                  *velerov1api.Restore
 	crClient                 client.Client
+	vgsClient                *csiutil.VGSClient
 	backupStore              persistence.BackupStore
 	backupVolumeInfos        []*volume.BackupVolumeInfo
 	restoreVolumeInfos       []*volume.RestoreVolumeInfo
@@ -496,15 +504,18 @@ func (ctx *finalizerContext) hasVolumeGroupSnapshotHandles() bool {
 func (ctx *finalizerContext) cleanupStubVGSC() (warnings results.Result) {
 	ctx.logger.Info("cleaning up stub VolumeGroupSnapshotContents")
 
-	vgscList := &volumegroupsnapshotv1.VolumeGroupSnapshotContentList{}
-	err := ctx.crClient.List(
+	vgscList, err := ctx.vgsClient.ListVGSC(
 		context.Background(),
-		vgscList,
-		client.MatchingLabels{velerov1api.RestoreNameLabel: ctx.restore.Name},
+		map[string]string{velerov1api.RestoreNameLabel: ctx.restore.Name},
 	)
 	if err != nil {
-		// If the CRD is not installed, listing will fail. This is expected
-		// on clusters without VolumeGroupSnapshot support, so treat as warning.
+		if errors.Is(err, csiutil.ErrVGSAPINotAvailable) {
+			// Cluster does not serve the VolumeGroupSnapshot API, so there is
+			// nothing to clean up.
+			ctx.logger.Info("VolumeGroupSnapshot API not available, skipping stub VGSC cleanup")
+			return warnings
+		}
+		// Any other listing failure is unexpected; treat as warning.
 		ctx.logger.WithError(err).Warn("failed to list stub VolumeGroupSnapshotContents, skipping cleanup")
 		warnings.Add("cluster", errors.Wrap(err, "failed to list stub VolumeGroupSnapshotContents"))
 		return warnings
@@ -560,7 +571,7 @@ func (ctx *finalizerContext) cleanupStubVGSC() (warnings results.Result) {
 		}
 
 		log.Info("deleting stub VolumeGroupSnapshotContent")
-		if err := ctx.crClient.Delete(context.Background(), vgsc); err != nil {
+		if err := ctx.vgsClient.DeleteVGSC(context.Background(), vgsc.Name); err != nil {
 			if apierrors.IsNotFound(err) {
 				log.Info("stub VolumeGroupSnapshotContent already deleted")
 				continue

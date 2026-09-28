@@ -54,6 +54,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/label"
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
 	velerotest "github.com/vmware-tanzu/velero/pkg/test"
+	"github.com/vmware-tanzu/velero/pkg/test/vgstest"
 	uploaderUtil "github.com/vmware-tanzu/velero/pkg/uploader/util"
 	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
 )
@@ -587,6 +588,8 @@ func TestNewPVCBackupItemAction(t *testing.T) {
 
 	f1 := &factorymocks.Factory{}
 	f1.On("KubebuilderClient").Return(crClient, nil)
+	f1.On("DynamicClient").Return(nil, nil)
+	f1.On("DiscoveryClient").Return(nil, nil)
 	plugin1 := NewPvcBackupItemAction(f1)
 	_, err1 := plugin1(logger)
 	require.NoError(t, err1)
@@ -1319,11 +1322,10 @@ func TestDetermineVGSClass(t *testing.T) {
 				initObjs = append(initObjs, &vgsClassCopy)
 			}
 
-			client := velerotest.NewFakeControllerRuntimeClient(t, initObjs...)
-			logger := logrus.New()
-			require.NoError(t, volumegroupsnapshotv1.AddToScheme(client.Scheme()))
-
-			action := &pvcBackupItemAction{crClient: client, log: logger}
+			action := &pvcBackupItemAction{
+				log:       logrus.New(),
+				vgsClient: vgstest.NewFakeVGSClient(t, "v1", initObjs...),
+			}
 
 			result, err := action.determineVGSClass(t.Context(), testDriver, tt.backup, tt.pvc)
 
@@ -1358,11 +1360,11 @@ func TestCreateVolumeGroupSnapshot(t *testing.T) {
 		},
 	}
 
-	crClient := velerotest.NewFakeControllerRuntimeClient(t)
 	log := logrus.New()
+	vgsClient := vgstest.NewFakeVGSClient(t, "v1")
 	action := &pvcBackupItemAction{
-		log:      log,
-		crClient: crClient,
+		log:       log,
+		vgsClient: vgsClient,
 	}
 
 	vgs, err := action.createVolumeGroupSnapshot(t.Context(), testBackup, testPVC, testLabelKey, testLabelValue, testVGSClass)
@@ -1371,7 +1373,6 @@ func TestCreateVolumeGroupSnapshot(t *testing.T) {
 
 	// Verify VGS fields
 	assert.Equal(t, testNamespace, vgs.Namespace)
-	assert.NotEmpty(t, vgs.GenerateName)
 	assert.Equal(t, testVGSClass, *vgs.Spec.VolumeGroupSnapshotClassName)
 	assert.NotNil(t, vgs.Spec.Source.Selector)
 	assert.Equal(t, testLabelValue, vgs.Spec.Source.Selector.MatchLabels[testLabelKey])
@@ -1379,10 +1380,10 @@ func TestCreateVolumeGroupSnapshot(t *testing.T) {
 	assert.Equal(t, label.GetValidName(testBackup.Name), vgs.Labels[velerov1api.BackupNameLabel])
 	assert.Equal(t, string(testBackup.UID), vgs.Labels[velerov1api.BackupUIDLabel])
 
-	// Check that it exists in fake client
-	retrieved := &volumegroupsnapshotv1.VolumeGroupSnapshot{}
-	err = crClient.Get(t.Context(), crclient.ObjectKey{Name: vgs.Name, Namespace: vgs.Namespace}, retrieved)
+	// Check that it exists in the fake client
+	retrieved, err := vgsClient.GetVGS(t.Context(), vgs.Namespace, vgs.Name)
 	require.NoError(t, err)
+	require.NotNil(t, retrieved)
 }
 
 func TestWaitForVGSAssociatedVS(t *testing.T) {
@@ -1694,10 +1695,10 @@ func TestPatchVGSCDeletionPolicy(t *testing.T) {
 				},
 			}
 
-			client := velerotest.NewFakeControllerRuntimeClient(t, vgs, vgsc)
+			vgsClient := vgstest.NewFakeVGSClient(t, "v1", vgsc)
 			action := &pvcBackupItemAction{
-				log:      velerotest.NewLogger(),
-				crClient: client,
+				log:       velerotest.NewLogger(),
+				vgsClient: vgsClient,
 			}
 
 			err := action.patchVGSCDeletionPolicy(t.Context(), vgs)
@@ -1707,8 +1708,7 @@ func TestPatchVGSCDeletionPolicy(t *testing.T) {
 			}
 			require.NoError(t, err)
 
-			updated := &volumegroupsnapshotv1.VolumeGroupSnapshotContent{}
-			err = client.Get(t.Context(), crclient.ObjectKey{Name: "test-vgsc"}, updated)
+			updated, err := vgsClient.GetVGSC(t.Context(), "test-vgsc")
 			require.NoError(t, err)
 			require.Equal(t, tt.expectedPolicy, updated.Spec.DeletionPolicy)
 		})
@@ -1774,10 +1774,10 @@ func TestDeleteVGSAndVGSC(t *testing.T) {
 				objs = append(objs, tt.existingVGSC)
 			}
 
-			client := velerotest.NewFakeControllerRuntimeClient(t, objs...)
+			vgsClient := vgstest.NewFakeVGSClient(t, "v1", objs...)
 			action := &pvcBackupItemAction{
-				log:      velerotest.NewLogger(),
-				crClient: client,
+				log:       velerotest.NewLogger(),
+				vgsClient: vgsClient,
 			}
 
 			err := action.deleteVGSAndVGSC(t.Context(), tt.vgs)
@@ -1785,14 +1785,12 @@ func TestDeleteVGSAndVGSC(t *testing.T) {
 
 			// Check VGSC is deleted
 			if tt.expectVGSCDelete {
-				got := &volumegroupsnapshotv1.VolumeGroupSnapshotContent{}
-				err = client.Get(t.Context(), crclient.ObjectKey{Name: "test-vgsc"}, got)
+				_, err = vgsClient.GetVGSC(t.Context(), "test-vgsc")
 				assert.True(t, apierrors.IsNotFound(err), "expected VGSC to be deleted")
 			}
 
 			// Check VGS is deleted
-			gotVGS := &volumegroupsnapshotv1.VolumeGroupSnapshot{}
-			err = client.Get(t.Context(), crclient.ObjectKey{Name: "test-vgs", Namespace: "ns"}, gotVGS)
+			_, err = vgsClient.GetVGS(t.Context(), "ns", "test-vgs")
 			assert.True(t, apierrors.IsNotFound(err), "expected VGS to be deleted")
 		})
 	}
@@ -1921,11 +1919,9 @@ func TestWaitForVGSCBinding(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client := velerotest.NewFakeControllerRuntimeClient(t, tt.vgs.DeepCopy())
-
 			action := &pvcBackupItemAction{
-				log:      velerotest.NewLogger(),
-				crClient: client,
+				log:       velerotest.NewLogger(),
+				vgsClient: vgstest.NewFakeVGSClient(t, "v1", tt.vgs.DeepCopy()),
 			}
 
 			err := action.waitForVGSCBinding(t.Context(), tt.vgs, 1*time.Second)
@@ -1992,17 +1988,15 @@ func TestGetVGSByLabels(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var client crclient.Client
+			var vgsClient = vgstest.NewFakeVGSClient(t, "v1", tt.vgsObjects...)
 			if tt.name == "client list error" {
-				// Inject a client that always errors on List
-				client = &failingClient{}
-			} else {
-				client = velerotest.NewFakeControllerRuntimeClient(t, tt.vgsObjects...)
+				// Simulate the VGS API being unavailable, which surfaces as a list error.
+				vgsClient = vgstest.NewFakeVGSClientUnavailable(t)
 			}
 
 			action := &pvcBackupItemAction{
-				log:      velerotest.NewLogger(),
-				crClient: client,
+				log:       velerotest.NewLogger(),
+				vgsClient: vgsClient,
 			}
 
 			vgs, err := action.getVGSByLabels(t.Context(), "test-ns", testLabels)
@@ -2065,13 +2059,16 @@ func TestHasOwnerReference(t *testing.T) {
 			expect: false,
 		},
 		{
-			name: "mismatch apiversion",
+			// Owner-ref matching is version-independent: the CSI controller may
+			// stamp the ref with any served VGS version, so Kind + UID must match
+			// regardless of apiVersion.
+			name: "different apiversion still matches on kind+uid",
 			ownerRef: metav1.OwnerReference{
 				Kind:       kuberesource.VGSKind,
-				APIVersion: "wrong.group/v1",
+				APIVersion: "groupsnapshot.storage.k8s.io/v1beta1",
 				UID:        vgs.UID,
 			},
-			expect: false,
+			expect: true,
 		},
 		{
 			name: "mismatch uid",

@@ -29,13 +29,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/builder"
 	factorymocks "github.com/vmware-tanzu/velero/pkg/client/mocks"
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
 	velerotest "github.com/vmware-tanzu/velero/pkg/test"
+	"github.com/vmware-tanzu/velero/pkg/test/vgstest"
 	"github.com/vmware-tanzu/velero/pkg/util"
 )
 
@@ -254,6 +254,8 @@ func TestNewVolumeSnapshotRestoreItemAction(t *testing.T) {
 
 	f1 := &factorymocks.Factory{}
 	f1.On("KubebuilderClient").Return(crClient, nil)
+	f1.On("DynamicClient").Return(nil, nil)
+	f1.On("DiscoveryClient").Return(nil, nil)
 	plugin1 := NewVolumeSnapshotRestoreItemAction(f1)
 	_, err1 := plugin1(logger)
 	require.NoError(t, err1)
@@ -376,16 +378,15 @@ func TestEnsureStubVGSCExists(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			crClient := velerotest.NewFakeControllerRuntimeClient(t)
-
-			// Create existing VGSC if provided
+			var seed []runtime.Object
 			if tc.existingVGSC != nil {
-				require.NoError(t, crClient.Create(context.Background(), tc.existingVGSC))
+				seed = append(seed, tc.existingVGSC)
 			}
+			vgsClient := vgstest.NewFakeVGSClient(t, "v1", seed...)
 
 			p := &volumeSnapshotRestoreItemAction{
-				log:      logrus.StandardLogger(),
-				crClient: crClient,
+				log:       logrus.StandardLogger(),
+				vgsClient: vgsClient,
 			}
 
 			err := p.ensureStubVGSCExists(context.Background(), tc.vs, tc.restore)
@@ -398,8 +399,7 @@ func TestEnsureStubVGSCExists(t *testing.T) {
 
 			// Check if VGSC was created/updated
 			vgscName := util.GenerateSha256FromRestoreUIDAndVsName(string(tc.restore.UID), tc.vs.Annotations[velerov1api.VolumeGroupSnapshotHandleAnnotation])
-			vgsc := &volumegroupsnapshotv1.VolumeGroupSnapshotContent{}
-			getErr := crClient.Get(context.Background(), crclient.ObjectKey{Name: vgscName}, vgsc)
+			vgsc, getErr := vgsClient.GetVGSC(context.Background(), vgscName)
 
 			if tc.expectVGSC {
 				require.NoError(t, getErr)
@@ -454,8 +454,6 @@ func TestAddSnapshotHandleToVGSC(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			crClient := velerotest.NewFakeControllerRuntimeClient(t)
-
 			var source volumegroupsnapshotv1.VolumeGroupSnapshotContentSource
 			if tc.nilGroupSnapshotHandles {
 				source = volumegroupsnapshotv1.VolumeGroupSnapshotContentSource{}
@@ -478,23 +476,20 @@ func TestAddSnapshotHandleToVGSC(t *testing.T) {
 					Source:         source,
 				},
 			}
-			require.NoError(t, crClient.Create(context.Background(), existingVGSC))
 
-			// Re-fetch to get the created object with proper metadata
-			fetchedVGSC := &volumegroupsnapshotv1.VolumeGroupSnapshotContent{}
-			require.NoError(t, crClient.Get(context.Background(), crclient.ObjectKey{Name: "test-vgsc"}, fetchedVGSC))
+			vgsClient := vgstest.NewFakeVGSClient(t, "v1", existingVGSC)
 
 			p := &volumeSnapshotRestoreItemAction{
-				log:      logrus.StandardLogger(),
-				crClient: crClient,
+				log:       logrus.StandardLogger(),
+				vgsClient: vgsClient,
 			}
 
-			err := p.addSnapshotHandleToVGSC(context.Background(), fetchedVGSC, tc.newHandle)
+			err := p.addSnapshotHandleToVGSC(context.Background(), existingVGSC, tc.newHandle)
 			require.NoError(t, err)
 
 			// Verify the VGSC has expected handles
-			updatedVGSC := &volumegroupsnapshotv1.VolumeGroupSnapshotContent{}
-			require.NoError(t, crClient.Get(context.Background(), crclient.ObjectKey{Name: "test-vgsc"}, updatedVGSC))
+			updatedVGSC, err := vgsClient.GetVGSC(context.Background(), "test-vgsc")
+			require.NoError(t, err)
 			require.ElementsMatch(t, tc.expectedHandles, updatedVGSC.Spec.Source.GroupSnapshotHandles.VolumeSnapshotHandles)
 		})
 	}

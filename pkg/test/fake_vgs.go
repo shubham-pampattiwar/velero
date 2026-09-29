@@ -48,13 +48,19 @@ func VGSTestRESTMapper(versions ...string) meta.RESTMapper {
 }
 
 // NewFakeControllerRuntimeClientWithVGS returns a fake controller-runtime client
-// with a RESTMapper serving the VolumeGroupSnapshot v1 API, seeded with objs. Use
-// this for tests that exercise the csi VGS helpers (which route unstructured VGS
-// I/O through the client's RESTMapper).
+// with a RESTMapper serving the VolumeGroupSnapshot v1beta2 API, seeded with objs.
+// Use this for tests that exercise the csi VGS helpers (which route unstructured
+// VGS I/O through the client's RESTMapper).
+//
+// Upstream serves v1 here. This branch compiles against the v1beta2 typed structs
+// (see pkg/util/csi/vgs.go), and the fake client keys stored objects off the
+// scheme, so the served version has to match or seeded objects are invisible to
+// the helpers. Version negotiation itself is covered by TestResolveVGSGroupVersion,
+// which drives VGSTestRESTMapper across the full v1/v1beta2/v1beta1 matrix.
 func NewFakeControllerRuntimeClientWithVGS(t *testing.T, objs ...runtime.Object) client.Client {
 	t.Helper()
 	return NewFakeControllerRuntimeClientBuilder(t).
-		WithRESTMapper(VGSTestRESTMapper("v1")).
+		WithRESTMapper(VGSTestRESTMapper("v1beta2")).
 		WithRuntimeObjects(objs...).
 		Build()
 }

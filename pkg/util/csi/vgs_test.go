@@ -19,7 +19,7 @@ package csi_test
 import (
 	"testing"
 
-	volumegroupsnapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1"
+	volumegroupsnapshotv1beta2 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1beta2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -67,7 +67,7 @@ func TestResolveVGSGroupVersion(t *testing.T) {
 // fake client whose RESTMapper serves the VGS API.
 func TestVGSHelpersRoundTrip(t *testing.T) {
 	className := "rbd-class"
-	seedClass := &volumegroupsnapshotv1.VolumeGroupSnapshotClass{
+	seedClass := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotClass{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   className,
 			Labels: map[string]string{"velero.io/csi-volumegroupsnapshot-class": "true"},
@@ -83,9 +83,9 @@ func TestVGSHelpersRoundTrip(t *testing.T) {
 	assert.Equal(t, "rbd.csi.ceph.com", classes.Items[0].Driver)
 
 	// Create + Get VGS
-	created, err := csi.CreateVGS(t.Context(), c, &volumegroupsnapshotv1.VolumeGroupSnapshot{
+	created, err := csi.CreateVGS(t.Context(), c, &volumegroupsnapshotv1beta2.VolumeGroupSnapshot{
 		ObjectMeta: metav1.ObjectMeta{Name: "vgs-1", Namespace: "ns-1"},
-		Spec:       volumegroupsnapshotv1.VolumeGroupSnapshotSpec{VolumeGroupSnapshotClassName: &className},
+		Spec:       volumegroupsnapshotv1beta2.VolumeGroupSnapshotSpec{VolumeGroupSnapshotClassName: &className},
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "vgs-1", created.Name)

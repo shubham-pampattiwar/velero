@@ -21,7 +21,7 @@ import (
 	"fmt"
 
 	"github.com/cockroachdb/errors"
-	volumegroupsnapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1"
+	volumegroupsnapshotv1beta2 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1beta2"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
@@ -138,7 +138,7 @@ func (p *volumeSnapshotRestoreItemAction) ensureStubVGSCExists(
 		}
 	}
 
-	vgsc := &volumegroupsnapshotv1.VolumeGroupSnapshotContent{
+	vgsc := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: vgscName,
 			Labels: map[string]string{
@@ -146,11 +146,11 @@ func (p *volumeSnapshotRestoreItemAction) ensureStubVGSCExists(
 			},
 			Annotations: vgscAnnotations,
 		},
-		Spec: volumegroupsnapshotv1.VolumeGroupSnapshotContentSpec{
+		Spec: volumegroupsnapshotv1beta2.VolumeGroupSnapshotContentSpec{
 			DeletionPolicy: snapshotv1api.VolumeSnapshotContentRetain,
 			Driver:         driver,
-			Source: volumegroupsnapshotv1.VolumeGroupSnapshotContentSource{
-				GroupSnapshotHandles: &volumegroupsnapshotv1.GroupSnapshotHandles{
+			Source: volumegroupsnapshotv1beta2.VolumeGroupSnapshotContentSource{
+				GroupSnapshotHandles: &volumegroupsnapshotv1beta2.GroupSnapshotHandles{
 					VolumeGroupSnapshotHandle: vgsh,
 					VolumeSnapshotHandles:     []string{snapshotHandle},
 				},
@@ -184,7 +184,7 @@ func (p *volumeSnapshotRestoreItemAction) ensureStubVGSCExists(
 			return err
 		}
 		if createdVGSC.Status == nil {
-			createdVGSC.Status = &volumegroupsnapshotv1.VolumeGroupSnapshotContentStatus{}
+			createdVGSC.Status = &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContentStatus{}
 		}
 		createdVGSC.Status.VolumeGroupSnapshotHandle = &vgsh
 		_, err = csiutil.UpdateVGSCStatus(ctx, p.crClient, createdVGSC)
@@ -201,7 +201,7 @@ func (p *volumeSnapshotRestoreItemAction) ensureStubVGSCExists(
 // This is needed when multiple VolumeSnapshots from the same VolumeGroupSnapshot are restored.
 func (p *volumeSnapshotRestoreItemAction) addSnapshotHandleToVGSC(
 	ctx context.Context,
-	vgsc *volumegroupsnapshotv1.VolumeGroupSnapshotContent,
+	vgsc *volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent,
 	snapshotHandle string,
 ) error {
 	// Check if handle is already in the list
@@ -229,7 +229,7 @@ func (p *volumeSnapshotRestoreItemAction) addSnapshotHandleToVGSC(
 				}
 			}
 		} else {
-			latest.Spec.Source.GroupSnapshotHandles = &volumegroupsnapshotv1.GroupSnapshotHandles{}
+			latest.Spec.Source.GroupSnapshotHandles = &volumegroupsnapshotv1beta2.GroupSnapshotHandles{}
 		}
 
 		latest.Spec.Source.GroupSnapshotHandles.VolumeSnapshotHandles = append(

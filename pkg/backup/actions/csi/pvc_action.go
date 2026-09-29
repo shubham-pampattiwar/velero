@@ -25,7 +25,7 @@ import (
 	"k8s.io/client-go/util/retry"
 
 	"github.com/cockroachdb/errors"
-	volumegroupsnapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1"
+	volumegroupsnapshotv1beta2 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1beta2"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
@@ -957,22 +957,22 @@ func (p *pvcBackupItemAction) createVolumeGroupSnapshot(
 	backup *velerov1api.Backup,
 	pvc corev1api.PersistentVolumeClaim,
 	vgsLabelKey, vgsLabelValue, vgsClassName string,
-) (*volumegroupsnapshotv1.VolumeGroupSnapshot, error) {
+) (*volumegroupsnapshotv1beta2.VolumeGroupSnapshot, error) {
 	vgsLabels := map[string]string{
 		velerov1api.BackupNameLabel: label.GetValidName(backup.Name),
 		velerov1api.BackupUIDLabel:  string(backup.UID),
 		vgsLabelKey:                 vgsLabelValue,
 	}
 
-	vgs := &volumegroupsnapshotv1.VolumeGroupSnapshot{
+	vgs := &volumegroupsnapshotv1beta2.VolumeGroupSnapshot{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: fmt.Sprintf("velero-%s-", vgsLabelValue),
 			Namespace:    pvc.Namespace,
 			Labels:       vgsLabels,
 		},
-		Spec: volumegroupsnapshotv1.VolumeGroupSnapshotSpec{
+		Spec: volumegroupsnapshotv1beta2.VolumeGroupSnapshotSpec{
 			VolumeGroupSnapshotClassName: &vgsClassName,
-			Source: volumegroupsnapshotv1.VolumeGroupSnapshotSource{
+			Source: volumegroupsnapshotv1beta2.VolumeGroupSnapshotSource{
 				Selector: &metav1.LabelSelector{
 					MatchLabels: map[string]string{
 						vgsLabelKey: vgsLabelValue,
@@ -1000,7 +1000,7 @@ func (p *pvcBackupItemAction) createVolumeGroupSnapshot(
 func (p *pvcBackupItemAction) waitForVGSAssociatedVS(
 	ctx context.Context,
 	groupedPVCs []corev1api.PersistentVolumeClaim,
-	vgs *volumegroupsnapshotv1.VolumeGroupSnapshot,
+	vgs *volumegroupsnapshotv1beta2.VolumeGroupSnapshot,
 	timeout time.Duration,
 ) (map[string]*snapshotv1api.VolumeSnapshot, error) {
 	expected := len(groupedPVCs)
@@ -1047,7 +1047,7 @@ func (p *pvcBackupItemAction) waitForVGSAssociatedVS(
 // Kind + UID rather than APIVersion because the CSI controller stamps owner
 // references with whatever VGS version the cluster serves (v1beta1/v1beta2/v1),
 // and the UID uniquely identifies the VGS regardless of version.
-func hasOwnerReference(obj metav1.Object, vgs *volumegroupsnapshotv1.VolumeGroupSnapshot) bool {
+func hasOwnerReference(obj metav1.Object, vgs *volumegroupsnapshotv1beta2.VolumeGroupSnapshot) bool {
 	for _, ref := range obj.GetOwnerReferences() {
 		if ref.Kind == kuberesource.VGSKind && ref.UID == vgs.UID {
 			return true
@@ -1058,7 +1058,7 @@ func hasOwnerReference(obj metav1.Object, vgs *volumegroupsnapshotv1.VolumeGroup
 
 // removeVGSOwnerReference strips any owner reference pointing at the given VGS
 // (matched by Kind + UID, version-independent).
-func removeVGSOwnerReference(obj metav1.Object, vgs *volumegroupsnapshotv1.VolumeGroupSnapshot) {
+func removeVGSOwnerReference(obj metav1.Object, vgs *volumegroupsnapshotv1beta2.VolumeGroupSnapshot) {
 	refs := obj.GetOwnerReferences()
 	kept := make([]metav1.OwnerReference, 0, len(refs))
 	for _, ref := range refs {
@@ -1073,7 +1073,7 @@ func removeVGSOwnerReference(obj metav1.Object, vgs *volumegroupsnapshotv1.Volum
 func (p *pvcBackupItemAction) updateVGSCreatedVS(
 	ctx context.Context,
 	vsMap map[string]*snapshotv1api.VolumeSnapshot,
-	vgs *volumegroupsnapshotv1.VolumeGroupSnapshot,
+	vgs *volumegroupsnapshotv1beta2.VolumeGroupSnapshot,
 	backup *velerov1api.Backup,
 ) error {
 	for pvcName, vs := range vsMap {
@@ -1114,7 +1114,7 @@ func (p *pvcBackupItemAction) updateVGSCreatedVS(
 	return nil
 }
 
-func (p *pvcBackupItemAction) patchVGSCDeletionPolicy(ctx context.Context, vgs *volumegroupsnapshotv1.VolumeGroupSnapshot) error {
+func (p *pvcBackupItemAction) patchVGSCDeletionPolicy(ctx context.Context, vgs *volumegroupsnapshotv1beta2.VolumeGroupSnapshot) error {
 	if vgs == nil || vgs.Status == nil || vgs.Status.BoundVolumeGroupSnapshotContentName == nil {
 		return errors.New("VolumeGroupSnapshotContent name not found in VGS status")
 	}
@@ -1141,7 +1141,7 @@ func (p *pvcBackupItemAction) patchVGSCDeletionPolicy(ctx context.Context, vgs *
 	})
 }
 
-func (p *pvcBackupItemAction) deleteVGSAndVGSC(ctx context.Context, vgs *volumegroupsnapshotv1.VolumeGroupSnapshot) error {
+func (p *pvcBackupItemAction) deleteVGSAndVGSC(ctx context.Context, vgs *volumegroupsnapshotv1beta2.VolumeGroupSnapshot) error {
 	if vgs.Status != nil && vgs.Status.BoundVolumeGroupSnapshotContentName != nil {
 		vgscName := *vgs.Status.BoundVolumeGroupSnapshotContentName
 		p.log.Infof("Deleting VolumeGroupSnapshotContent %s", vgscName)
@@ -1164,7 +1164,7 @@ func (p *pvcBackupItemAction) deleteVGSAndVGSC(ctx context.Context, vgs *volumeg
 
 func (p *pvcBackupItemAction) waitForVGSCBinding(
 	ctx context.Context,
-	vgs *volumegroupsnapshotv1.VolumeGroupSnapshot,
+	vgs *volumegroupsnapshotv1beta2.VolumeGroupSnapshot,
 	timeout time.Duration,
 ) error {
 	return wait.PollUntilContextTimeout(ctx, time.Second, timeout, true, func(ctx context.Context) (bool, error) {
@@ -1181,7 +1181,7 @@ func (p *pvcBackupItemAction) waitForVGSCBinding(
 	})
 }
 
-func (p *pvcBackupItemAction) getVGSByLabels(ctx context.Context, namespace string, labels map[string]string) (*volumegroupsnapshotv1.VolumeGroupSnapshot, error) {
+func (p *pvcBackupItemAction) getVGSByLabels(ctx context.Context, namespace string, labels map[string]string) (*volumegroupsnapshotv1beta2.VolumeGroupSnapshot, error) {
 	vgsList, err := csi.ListVGS(ctx, p.crClient, namespace, labels)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to list VolumeGroupSnapshots by labels")

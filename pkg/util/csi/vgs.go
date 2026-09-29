@@ -20,7 +20,7 @@ import (
 	"context"
 
 	"github.com/cockroachdb/errors"
-	volumegroupsnapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1"
+	volumegroupsnapshotv1beta2 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1beta2"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -36,9 +36,14 @@ import (
 // (which sends the GVK of the Go type and can't negotiate), these helpers do
 // all VGS I/O with *unstructured.Unstructured on the existing crClient: the
 // object's GVK is stamped to the served version and controller-runtime routes
-// it via its RESTMapper. Objects are converted to/from the canonical v1 typed
-// structs, whose field layout is identical across v1beta1/v1beta2/v1 for
+// it via its RESTMapper. Objects are converted to/from the canonical v1beta2
+// typed structs, whose field layout is identical across v1beta1/v1beta2/v1 for
 // everything Velero reads or writes.
+//
+// Upstream uses the v1 structs here. This branch pins external-snapshotter
+// client v8.4.0, which predates the v1 package, so the identical v1beta2
+// structs are used instead. This is a compile-time choice only: the version
+// sent on the wire is still whatever ResolveVGSGroupVersion negotiates.
 const (
 	// VGSGroup is the VolumeGroupSnapshot API group.
 	VGSGroup = "groupsnapshot.storage.k8s.io"
@@ -113,7 +118,7 @@ func fromUnstructured(u *unstructured.Unstructured, out any) error {
 // ---- VolumeGroupSnapshotClass (cluster-scoped) ----
 
 // ListVGSClasses lists all VolumeGroupSnapshotClasses served by the cluster.
-func ListVGSClasses(ctx context.Context, c client.Client) (*volumegroupsnapshotv1.VolumeGroupSnapshotClassList, error) {
+func ListVGSClasses(ctx context.Context, c client.Client) (*volumegroupsnapshotv1beta2.VolumeGroupSnapshotClassList, error) {
 	gv, err := ResolveVGSGroupVersion(c.RESTMapper())
 	if err != nil {
 		return nil, err
@@ -123,9 +128,9 @@ func ListVGSClasses(ctx context.Context, c client.Client) (*volumegroupsnapshotv
 	if err := c.List(ctx, ul); err != nil {
 		return nil, err
 	}
-	out := &volumegroupsnapshotv1.VolumeGroupSnapshotClassList{}
+	out := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotClassList{}
 	for i := range ul.Items {
-		item := volumegroupsnapshotv1.VolumeGroupSnapshotClass{}
+		item := volumegroupsnapshotv1beta2.VolumeGroupSnapshotClass{}
 		if err := fromUnstructured(&ul.Items[i], &item); err != nil {
 			return nil, err
 		}
@@ -137,7 +142,7 @@ func ListVGSClasses(ctx context.Context, c client.Client) (*volumegroupsnapshotv
 // ---- VolumeGroupSnapshot (namespaced) ----
 
 // CreateVGS creates a VolumeGroupSnapshot and returns the created object.
-func CreateVGS(ctx context.Context, c client.Client, vgs *volumegroupsnapshotv1.VolumeGroupSnapshot) (*volumegroupsnapshotv1.VolumeGroupSnapshot, error) {
+func CreateVGS(ctx context.Context, c client.Client, vgs *volumegroupsnapshotv1beta2.VolumeGroupSnapshot) (*volumegroupsnapshotv1beta2.VolumeGroupSnapshot, error) {
 	gv, err := ResolveVGSGroupVersion(c.RESTMapper())
 	if err != nil {
 		return nil, err
@@ -149,7 +154,7 @@ func CreateVGS(ctx context.Context, c client.Client, vgs *volumegroupsnapshotv1.
 	if err := c.Create(ctx, u); err != nil {
 		return nil, err
 	}
-	out := &volumegroupsnapshotv1.VolumeGroupSnapshot{}
+	out := &volumegroupsnapshotv1beta2.VolumeGroupSnapshot{}
 	if err := fromUnstructured(u, out); err != nil {
 		return nil, err
 	}
@@ -157,7 +162,7 @@ func CreateVGS(ctx context.Context, c client.Client, vgs *volumegroupsnapshotv1.
 }
 
 // GetVGS fetches a VolumeGroupSnapshot by namespace/name.
-func GetVGS(ctx context.Context, c client.Client, namespace, name string) (*volumegroupsnapshotv1.VolumeGroupSnapshot, error) {
+func GetVGS(ctx context.Context, c client.Client, namespace, name string) (*volumegroupsnapshotv1beta2.VolumeGroupSnapshot, error) {
 	gv, err := ResolveVGSGroupVersion(c.RESTMapper())
 	if err != nil {
 		return nil, err
@@ -167,7 +172,7 @@ func GetVGS(ctx context.Context, c client.Client, namespace, name string) (*volu
 	if err := c.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, u); err != nil {
 		return nil, err
 	}
-	out := &volumegroupsnapshotv1.VolumeGroupSnapshot{}
+	out := &volumegroupsnapshotv1beta2.VolumeGroupSnapshot{}
 	if err := fromUnstructured(u, out); err != nil {
 		return nil, err
 	}
@@ -175,7 +180,7 @@ func GetVGS(ctx context.Context, c client.Client, namespace, name string) (*volu
 }
 
 // ListVGS lists VolumeGroupSnapshots in a namespace matching the given labels.
-func ListVGS(ctx context.Context, c client.Client, namespace string, matchLabels map[string]string) (*volumegroupsnapshotv1.VolumeGroupSnapshotList, error) {
+func ListVGS(ctx context.Context, c client.Client, namespace string, matchLabels map[string]string) (*volumegroupsnapshotv1beta2.VolumeGroupSnapshotList, error) {
 	gv, err := ResolveVGSGroupVersion(c.RESTMapper())
 	if err != nil {
 		return nil, err
@@ -189,9 +194,9 @@ func ListVGS(ctx context.Context, c client.Client, namespace string, matchLabels
 	if err := c.List(ctx, ul, opts...); err != nil {
 		return nil, err
 	}
-	out := &volumegroupsnapshotv1.VolumeGroupSnapshotList{}
+	out := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotList{}
 	for i := range ul.Items {
-		item := volumegroupsnapshotv1.VolumeGroupSnapshot{}
+		item := volumegroupsnapshotv1beta2.VolumeGroupSnapshot{}
 		if err := fromUnstructured(&ul.Items[i], &item); err != nil {
 			return nil, err
 		}
@@ -216,7 +221,7 @@ func DeleteVGS(ctx context.Context, c client.Client, namespace, name string) err
 // ---- VolumeGroupSnapshotContent (cluster-scoped) ----
 
 // CreateVGSC creates a VolumeGroupSnapshotContent and returns the created object.
-func CreateVGSC(ctx context.Context, c client.Client, vgsc *volumegroupsnapshotv1.VolumeGroupSnapshotContent) (*volumegroupsnapshotv1.VolumeGroupSnapshotContent, error) {
+func CreateVGSC(ctx context.Context, c client.Client, vgsc *volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent) (*volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent, error) {
 	gv, err := ResolveVGSGroupVersion(c.RESTMapper())
 	if err != nil {
 		return nil, err
@@ -228,7 +233,7 @@ func CreateVGSC(ctx context.Context, c client.Client, vgsc *volumegroupsnapshotv
 	if err := c.Create(ctx, u); err != nil {
 		return nil, err
 	}
-	out := &volumegroupsnapshotv1.VolumeGroupSnapshotContent{}
+	out := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent{}
 	if err := fromUnstructured(u, out); err != nil {
 		return nil, err
 	}
@@ -236,7 +241,7 @@ func CreateVGSC(ctx context.Context, c client.Client, vgsc *volumegroupsnapshotv
 }
 
 // GetVGSC fetches a VolumeGroupSnapshotContent by name.
-func GetVGSC(ctx context.Context, c client.Client, name string) (*volumegroupsnapshotv1.VolumeGroupSnapshotContent, error) {
+func GetVGSC(ctx context.Context, c client.Client, name string) (*volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent, error) {
 	gv, err := ResolveVGSGroupVersion(c.RESTMapper())
 	if err != nil {
 		return nil, err
@@ -246,7 +251,7 @@ func GetVGSC(ctx context.Context, c client.Client, name string) (*volumegroupsna
 	if err := c.Get(ctx, client.ObjectKey{Name: name}, u); err != nil {
 		return nil, err
 	}
-	out := &volumegroupsnapshotv1.VolumeGroupSnapshotContent{}
+	out := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent{}
 	if err := fromUnstructured(u, out); err != nil {
 		return nil, err
 	}
@@ -254,7 +259,7 @@ func GetVGSC(ctx context.Context, c client.Client, name string) (*volumegroupsna
 }
 
 // ListVGSC lists VolumeGroupSnapshotContents matching the given labels.
-func ListVGSC(ctx context.Context, c client.Client, matchLabels map[string]string) (*volumegroupsnapshotv1.VolumeGroupSnapshotContentList, error) {
+func ListVGSC(ctx context.Context, c client.Client, matchLabels map[string]string) (*volumegroupsnapshotv1beta2.VolumeGroupSnapshotContentList, error) {
 	gv, err := ResolveVGSGroupVersion(c.RESTMapper())
 	if err != nil {
 		return nil, err
@@ -268,9 +273,9 @@ func ListVGSC(ctx context.Context, c client.Client, matchLabels map[string]strin
 	if err := c.List(ctx, ul, opts...); err != nil {
 		return nil, err
 	}
-	out := &volumegroupsnapshotv1.VolumeGroupSnapshotContentList{}
+	out := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContentList{}
 	for i := range ul.Items {
-		item := volumegroupsnapshotv1.VolumeGroupSnapshotContent{}
+		item := volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent{}
 		if err := fromUnstructured(&ul.Items[i], &item); err != nil {
 			return nil, err
 		}
@@ -280,7 +285,7 @@ func ListVGSC(ctx context.Context, c client.Client, matchLabels map[string]strin
 }
 
 // UpdateVGSC updates a VolumeGroupSnapshotContent (spec/metadata).
-func UpdateVGSC(ctx context.Context, c client.Client, vgsc *volumegroupsnapshotv1.VolumeGroupSnapshotContent) (*volumegroupsnapshotv1.VolumeGroupSnapshotContent, error) {
+func UpdateVGSC(ctx context.Context, c client.Client, vgsc *volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent) (*volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent, error) {
 	gv, err := ResolveVGSGroupVersion(c.RESTMapper())
 	if err != nil {
 		return nil, err
@@ -292,7 +297,7 @@ func UpdateVGSC(ctx context.Context, c client.Client, vgsc *volumegroupsnapshotv
 	if err := c.Update(ctx, u); err != nil {
 		return nil, err
 	}
-	out := &volumegroupsnapshotv1.VolumeGroupSnapshotContent{}
+	out := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent{}
 	if err := fromUnstructured(u, out); err != nil {
 		return nil, err
 	}
@@ -300,7 +305,7 @@ func UpdateVGSC(ctx context.Context, c client.Client, vgsc *volumegroupsnapshotv
 }
 
 // UpdateVGSCStatus updates the status subresource of a VolumeGroupSnapshotContent.
-func UpdateVGSCStatus(ctx context.Context, c client.Client, vgsc *volumegroupsnapshotv1.VolumeGroupSnapshotContent) (*volumegroupsnapshotv1.VolumeGroupSnapshotContent, error) {
+func UpdateVGSCStatus(ctx context.Context, c client.Client, vgsc *volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent) (*volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent, error) {
 	gv, err := ResolveVGSGroupVersion(c.RESTMapper())
 	if err != nil {
 		return nil, err
@@ -312,7 +317,7 @@ func UpdateVGSCStatus(ctx context.Context, c client.Client, vgsc *volumegroupsna
 	if err := c.Status().Update(ctx, u); err != nil {
 		return nil, err
 	}
-	out := &volumegroupsnapshotv1.VolumeGroupSnapshotContent{}
+	out := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent{}
 	if err := fromUnstructured(u, out); err != nil {
 		return nil, err
 	}

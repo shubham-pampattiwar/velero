@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"testing"
 
-	volumegroupsnapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1"
+	volumegroupsnapshotv1beta2 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1beta2"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
@@ -268,7 +268,7 @@ func TestEnsureStubVGSCExists(t *testing.T) {
 		name           string
 		vs             *snapshotv1api.VolumeSnapshot
 		restore        *velerov1api.Restore
-		existingVGSC   *volumegroupsnapshotv1.VolumeGroupSnapshotContent
+		existingVGSC   *volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent
 		expectVGSC     bool
 		expectErr      bool
 		expectedHandle string
@@ -353,15 +353,15 @@ func TestEnsureStubVGSCExists(t *testing.T) {
 				},
 			},
 			restore: builder.ForRestore("velero", "restore").ObjectMeta(builder.WithUID("restore-uid")).Result(),
-			existingVGSC: &volumegroupsnapshotv1.VolumeGroupSnapshotContent{
+			existingVGSC: &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: util.GenerateSha256FromRestoreUIDAndVsName("restore-uid", testVGSHandle),
 				},
-				Spec: volumegroupsnapshotv1.VolumeGroupSnapshotContentSpec{
+				Spec: volumegroupsnapshotv1beta2.VolumeGroupSnapshotContentSpec{
 					Driver:         testDriver,
 					DeletionPolicy: snapshotv1api.VolumeSnapshotContentRetain,
-					Source: volumegroupsnapshotv1.VolumeGroupSnapshotContentSource{
-						GroupSnapshotHandles: &volumegroupsnapshotv1.GroupSnapshotHandles{
+					Source: volumegroupsnapshotv1beta2.VolumeGroupSnapshotContentSource{
+						GroupSnapshotHandles: &volumegroupsnapshotv1beta2.GroupSnapshotHandles{
 							VolumeGroupSnapshotHandle: testVGSHandle,
 							VolumeSnapshotHandles:     []string{testSnapshotHandle},
 						},
@@ -452,23 +452,23 @@ func TestAddSnapshotHandleToVGSC(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			var source volumegroupsnapshotv1.VolumeGroupSnapshotContentSource
+			var source volumegroupsnapshotv1beta2.VolumeGroupSnapshotContentSource
 			if tc.nilGroupSnapshotHandles {
-				source = volumegroupsnapshotv1.VolumeGroupSnapshotContentSource{}
+				source = volumegroupsnapshotv1beta2.VolumeGroupSnapshotContentSource{}
 			} else {
-				source = volumegroupsnapshotv1.VolumeGroupSnapshotContentSource{
-					GroupSnapshotHandles: &volumegroupsnapshotv1.GroupSnapshotHandles{
+				source = volumegroupsnapshotv1beta2.VolumeGroupSnapshotContentSource{
+					GroupSnapshotHandles: &volumegroupsnapshotv1beta2.GroupSnapshotHandles{
 						VolumeGroupSnapshotHandle: testVGSHandle,
 						VolumeSnapshotHandles:     tc.existingHandles,
 					},
 				}
 			}
 
-			existingVGSC := &volumegroupsnapshotv1.VolumeGroupSnapshotContent{
+			existingVGSC := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-vgsc",
 				},
-				Spec: volumegroupsnapshotv1.VolumeGroupSnapshotContentSpec{
+				Spec: volumegroupsnapshotv1beta2.VolumeGroupSnapshotContentSpec{
 					Driver:         testDriver,
 					DeletionPolicy: snapshotv1api.VolumeSnapshotContentRetain,
 					Source:         source,

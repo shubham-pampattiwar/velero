@@ -76,10 +76,6 @@ type pvcBackupItemAction struct {
 	log      logrus.FieldLogger
 	crClient crclient.Client
 
-	// vgsClient talks to the VolumeGroupSnapshot API at whatever version the
-	// cluster serves (v1/v1beta2/v1beta1), resolved at runtime.
-	vgsClient *csi.VGSClient
-
 	// pvcPodCache provides lazy per-namespace caching of PVC-to-Pod mappings.
 	// Since plugin instances are unique per backup (created via newPluginManager and
 	// cleaned up via CleanupClients at backup completion), we can safely cache this
@@ -708,20 +704,9 @@ func NewPvcBackupItemAction(f veleroclient.Factory) plugincommon.HandlerInitiali
 			return nil, errors.WithStack(err)
 		}
 
-		dynClient, err := f.DynamicClient()
-		if err != nil {
-			return nil, errors.WithStack(err)
-		}
-
-		discoveryClient, err := f.DiscoveryClient()
-		if err != nil {
-			return nil, errors.WithStack(err)
-		}
-
 		return &pvcBackupItemAction{
-			log:       logger,
-			crClient:  crClient,
-			vgsClient: csi.NewVGSClient(dynClient, discoveryClient, logger),
+			log:      logger,
+			crClient: crClient,
 		}, nil
 	}
 }
@@ -834,7 +819,7 @@ func (p *pvcBackupItemAction) getVolumeSnapshotReference(
 		}
 
 		// Re-fetch latest VGS to ensure status is populated after VGSC binding
-		latestVGS, err := p.vgsClient.GetVGS(ctx, newVGS.Namespace, newVGS.Name)
+		latestVGS, err := csi.GetVGS(ctx, p.crClient, newVGS.Namespace, newVGS.Name)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to re-fetch VolumeGroupSnapshot %s after VGSC binding wait", newVGS.Name)
 		}
@@ -982,7 +967,7 @@ func (p *pvcBackupItemAction) determineVGSClass(
 	}
 
 	// 3. Fallback to label-based default
-	vgsClassList, err := p.vgsClient.ListVGSClasses(ctx)
+	vgsClassList, err := csi.ListVGSClasses(ctx, p.crClient)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to list VolumeGroupSnapshotClasses")
 	}
@@ -1036,7 +1021,7 @@ func (p *pvcBackupItemAction) createVolumeGroupSnapshot(
 		},
 	}
 
-	if _, err := p.vgsClient.CreateVGS(ctx, vgs); err != nil {
+	if _, err := csi.CreateVGS(ctx, p.crClient, vgs); err != nil {
 		return nil, errors.Wrap(err, "failed to create VolumeGroupSnapshot")
 	}
 
@@ -1176,7 +1161,7 @@ func (p *pvcBackupItemAction) patchVGSCDeletionPolicy(ctx context.Context, vgs *
 	vgscName := vgs.Status.BoundVolumeGroupSnapshotContentName
 
 	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		vgsc, err := p.vgsClient.GetVGSC(ctx, *vgscName)
+		vgsc, err := csi.GetVGSC(ctx, p.crClient, *vgscName)
 		if err != nil {
 			return errors.Wrapf(err, "failed to get VolumeGroupSnapshotContent %s for VolumeGroupSnapshot %s/%s", *vgscName, vgs.Namespace, vgs.Name)
 		}
@@ -1184,7 +1169,7 @@ func (p *pvcBackupItemAction) patchVGSCDeletionPolicy(ctx context.Context, vgs *
 		if vgsc.Spec.DeletionPolicy == snapshotv1api.VolumeSnapshotContentDelete {
 			p.log.Infof("Patching VGSC %s to Retain deletionPolicy", *vgscName)
 			vgsc.Spec.DeletionPolicy = snapshotv1api.VolumeSnapshotContentRetain
-			if _, err := p.vgsClient.UpdateVGSC(ctx, vgsc); err != nil {
+			if _, err := csi.UpdateVGSC(ctx, p.crClient, vgsc); err != nil {
 				return errors.Wrapf(err, "failed to update VGSC %s deletionPolicy", *vgscName)
 			}
 		} else {
@@ -1199,7 +1184,7 @@ func (p *pvcBackupItemAction) deleteVGSAndVGSC(ctx context.Context, vgs *volumeg
 	if vgs.Status != nil && vgs.Status.BoundVolumeGroupSnapshotContentName != nil {
 		vgscName := *vgs.Status.BoundVolumeGroupSnapshotContentName
 		p.log.Infof("Deleting VolumeGroupSnapshotContent %s", vgscName)
-		if err := p.vgsClient.DeleteVGSC(ctx, vgscName); err != nil && !apierrors.IsNotFound(err) {
+		if err := csi.DeleteVGSC(ctx, p.crClient, vgscName); err != nil && !apierrors.IsNotFound(err) {
 			p.log.Warnf("Failed to delete VolumeGroupSnapshotContent %s: %v", vgscName, err)
 			return errors.Wrapf(err, "failed to delete VolumeGroupSnapshotContent %s", vgscName)
 		}
@@ -1208,7 +1193,7 @@ func (p *pvcBackupItemAction) deleteVGSAndVGSC(ctx context.Context, vgs *volumeg
 	}
 
 	p.log.Infof("Deleting VolumeGroupSnapshot %s/%s", vgs.Namespace, vgs.Name)
-	if err := p.vgsClient.DeleteVGS(ctx, vgs.Namespace, vgs.Name); err != nil && !apierrors.IsNotFound(err) {
+	if err := csi.DeleteVGS(ctx, p.crClient, vgs.Namespace, vgs.Name); err != nil && !apierrors.IsNotFound(err) {
 		p.log.Warnf("Failed to delete VolumeGroupSnapshot %s/%s: %v", vgs.Namespace, vgs.Name, err)
 		return errors.Wrapf(err, "failed to delete VolumeGroupSnapshot %s/%s", vgs.Namespace, vgs.Name)
 	}
@@ -1222,7 +1207,7 @@ func (p *pvcBackupItemAction) waitForVGSCBinding(
 	timeout time.Duration,
 ) error {
 	return wait.PollUntilContextTimeout(ctx, time.Second, timeout, true, func(ctx context.Context) (bool, error) {
-		vgsRef, err := p.vgsClient.GetVGS(ctx, vgs.Namespace, vgs.Name)
+		vgsRef, err := csi.GetVGS(ctx, p.crClient, vgs.Namespace, vgs.Name)
 		if err != nil {
 			return false, err
 		}
@@ -1236,7 +1221,7 @@ func (p *pvcBackupItemAction) waitForVGSCBinding(
 }
 
 func (p *pvcBackupItemAction) getVGSByLabels(ctx context.Context, namespace string, labels map[string]string) (*volumegroupsnapshotv1.VolumeGroupSnapshot, error) {
-	vgsList, err := p.vgsClient.ListVGS(ctx, namespace, labels)
+	vgsList, err := csi.ListVGS(ctx, p.crClient, namespace, labels)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to list VolumeGroupSnapshots by labels")
 	}

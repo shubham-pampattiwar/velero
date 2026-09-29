@@ -918,8 +918,6 @@ func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string
 			backupStoreGetter,
 			s.metrics,
 			s.crClient,
-			s.dynamicClient,
-			s.discoveryClient,
 			multiHookTracker,
 			s.config.ResourceTimeout,
 		).SetupWithManager(s.mgr); err != nil {

@@ -47,10 +47,6 @@ import (
 type volumeSnapshotRestoreItemAction struct {
 	log      logrus.FieldLogger
 	crClient crclient.Client
-
-	// vgsClient talks to the VolumeGroupSnapshot API at whatever version the
-	// cluster serves (v1/v1beta2/v1beta1), resolved at runtime.
-	vgsClient *csiutil.VGSClient
 }
 
 // AppliesTo returns information indicating that
@@ -112,7 +108,7 @@ func (p *volumeSnapshotRestoreItemAction) ensureStubVGSCExists(
 	vgscName := util.GenerateSha256FromRestoreUIDAndVsName(string(restore.UID), vgsh)
 
 	// Check if VGSC already exists
-	existingVGSC, err := p.vgsClient.GetVGSC(ctx, vgscName)
+	existingVGSC, err := csiutil.GetVGSC(ctx, p.crClient, vgscName)
 	if err == nil {
 		// VGSC already exists, add this snapshot handle if not already present
 		p.log.Infof("Stub VGSC %s already exists for VolumeGroupSnapshotHandle %s", vgscName, vgsh)
@@ -127,7 +123,7 @@ func (p *volumeSnapshotRestoreItemAction) ensureStubVGSCExists(
 
 	// Look up VolumeGroupSnapshotClass to get secret annotations
 	vgscAnnotations := map[string]string{}
-	if vgscList, err := p.vgsClient.ListVGSClasses(ctx); err == nil {
+	if vgscList, err := csiutil.ListVGSClasses(ctx, p.crClient); err == nil {
 		for _, vgsClass := range vgscList.Items {
 			if vgsClass.Driver == driver {
 				// Found matching class, extract secret parameters
@@ -166,12 +162,12 @@ func (p *volumeSnapshotRestoreItemAction) ensureStubVGSCExists(
 		},
 	}
 
-	if _, err := p.vgsClient.CreateVGSC(ctx, vgsc); err != nil {
+	if _, err := csiutil.CreateVGSC(ctx, p.crClient, vgsc); err != nil {
 		if apierrors.IsAlreadyExists(err) {
 			// Another VS restore created the VGSC between our Get and Create.
 			// Re-fetch and add our snapshot handle.
 			p.log.Infof("Stub VGSC %s was created by another VS restore, adding our handle", vgscName)
-			raceVGSC, getErr := p.vgsClient.GetVGSC(ctx, vgscName)
+			raceVGSC, getErr := csiutil.GetVGSC(ctx, p.crClient, vgscName)
 			if getErr != nil {
 				return errors.Wrapf(getErr, "failed to get VGSC %s after race", vgscName)
 			}
@@ -183,7 +179,7 @@ func (p *volumeSnapshotRestoreItemAction) ensureStubVGSCExists(
 	// Set volumeGroupSnapshotHandle in status. Re-fetch inside the retry to pick up
 	// the latest resourceVersion and avoid conflicts with the CSI controller.
 	if err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		createdVGSC, err := p.vgsClient.GetVGSC(ctx, vgscName)
+		createdVGSC, err := csiutil.GetVGSC(ctx, p.crClient, vgscName)
 		if err != nil {
 			return err
 		}
@@ -191,7 +187,7 @@ func (p *volumeSnapshotRestoreItemAction) ensureStubVGSCExists(
 			createdVGSC.Status = &volumegroupsnapshotv1.VolumeGroupSnapshotContentStatus{}
 		}
 		createdVGSC.Status.VolumeGroupSnapshotHandle = &vgsh
-		_, err = p.vgsClient.UpdateVGSCStatus(ctx, createdVGSC)
+		_, err = csiutil.UpdateVGSCStatus(ctx, p.crClient, createdVGSC)
 		return err
 	}); err != nil {
 		p.log.Warnf("Failed to set stub VGSC %s status: %v", vgscName, err)
@@ -221,7 +217,7 @@ func (p *volumeSnapshotRestoreItemAction) addSnapshotHandleToVGSC(
 	// Add the snapshot handle to the list. Re-fetch inside the retry to pick up the
 	// latest resourceVersion and avoid conflicts with concurrent VS restores.
 	if err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		latest, err := p.vgsClient.GetVGSC(ctx, vgsc.Name)
+		latest, err := csiutil.GetVGSC(ctx, p.crClient, vgsc.Name)
 		if err != nil {
 			return err
 		}
@@ -241,7 +237,7 @@ func (p *volumeSnapshotRestoreItemAction) addSnapshotHandleToVGSC(
 			snapshotHandle,
 		)
 
-		_, err = p.vgsClient.UpdateVGSC(ctx, latest)
+		_, err = csiutil.UpdateVGSC(ctx, p.crClient, latest)
 		return err
 	}); err != nil {
 		return errors.Wrapf(err, "failed to add snapshot handle to VGSC %s", vgsc.Name)
@@ -374,20 +370,9 @@ func NewVolumeSnapshotRestoreItemAction(
 			return nil, err
 		}
 
-		dynClient, err := f.DynamicClient()
-		if err != nil {
-			return nil, err
-		}
-
-		discoveryClient, err := f.DiscoveryClient()
-		if err != nil {
-			return nil, err
-		}
-
 		return &volumeSnapshotRestoreItemAction{
-			log:       logger,
-			crClient:  crClient,
-			vgsClient: csiutil.NewVGSClient(dynClient, discoveryClient, logger),
+			log:      logger,
+			crClient: crClient,
 		}, nil
 	}
 }

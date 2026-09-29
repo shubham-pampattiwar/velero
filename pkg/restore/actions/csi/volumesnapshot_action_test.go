@@ -35,8 +35,8 @@ import (
 	factorymocks "github.com/vmware-tanzu/velero/pkg/client/mocks"
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
 	velerotest "github.com/vmware-tanzu/velero/pkg/test"
-	"github.com/vmware-tanzu/velero/pkg/test/vgstest"
 	"github.com/vmware-tanzu/velero/pkg/util"
+	csiutil "github.com/vmware-tanzu/velero/pkg/util/csi"
 )
 
 var (
@@ -254,8 +254,6 @@ func TestNewVolumeSnapshotRestoreItemAction(t *testing.T) {
 
 	f1 := &factorymocks.Factory{}
 	f1.On("KubebuilderClient").Return(crClient, nil)
-	f1.On("DynamicClient").Return(nil, nil)
-	f1.On("DiscoveryClient").Return(nil, nil)
 	plugin1 := NewVolumeSnapshotRestoreItemAction(f1)
 	_, err1 := plugin1(logger)
 	require.NoError(t, err1)
@@ -382,11 +380,11 @@ func TestEnsureStubVGSCExists(t *testing.T) {
 			if tc.existingVGSC != nil {
 				seed = append(seed, tc.existingVGSC)
 			}
-			vgsClient := vgstest.NewFakeVGSClient(t, "v1", seed...)
+			crClient := velerotest.NewFakeControllerRuntimeClientWithVGS(t, seed...)
 
 			p := &volumeSnapshotRestoreItemAction{
-				log:       logrus.StandardLogger(),
-				vgsClient: vgsClient,
+				log:      logrus.StandardLogger(),
+				crClient: crClient,
 			}
 
 			err := p.ensureStubVGSCExists(context.Background(), tc.vs, tc.restore)
@@ -399,7 +397,7 @@ func TestEnsureStubVGSCExists(t *testing.T) {
 
 			// Check if VGSC was created/updated
 			vgscName := util.GenerateSha256FromRestoreUIDAndVsName(string(tc.restore.UID), tc.vs.Annotations[velerov1api.VolumeGroupSnapshotHandleAnnotation])
-			vgsc, getErr := vgsClient.GetVGSC(context.Background(), vgscName)
+			vgsc, getErr := csiutil.GetVGSC(context.Background(), crClient, vgscName)
 
 			if tc.expectVGSC {
 				require.NoError(t, getErr)
@@ -477,18 +475,18 @@ func TestAddSnapshotHandleToVGSC(t *testing.T) {
 				},
 			}
 
-			vgsClient := vgstest.NewFakeVGSClient(t, "v1", existingVGSC)
+			crClient := velerotest.NewFakeControllerRuntimeClientWithVGS(t, existingVGSC)
 
 			p := &volumeSnapshotRestoreItemAction{
-				log:       logrus.StandardLogger(),
-				vgsClient: vgsClient,
+				log:      logrus.StandardLogger(),
+				crClient: crClient,
 			}
 
 			err := p.addSnapshotHandleToVGSC(context.Background(), existingVGSC, tc.newHandle)
 			require.NoError(t, err)
 
 			// Verify the VGSC has expected handles
-			updatedVGSC, err := vgsClient.GetVGSC(context.Background(), "test-vgsc")
+			updatedVGSC, err := csiutil.GetVGSC(context.Background(), crClient, "test-vgsc")
 			require.NoError(t, err)
 			require.ElementsMatch(t, tc.expectedHandles, updatedVGSC.Spec.Source.GroupSnapshotHandles.VolumeSnapshotHandles)
 		})

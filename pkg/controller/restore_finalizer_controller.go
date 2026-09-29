@@ -34,8 +34,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/discovery"
-	"k8s.io/client-go/dynamic"
 	"k8s.io/utils/clock"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -66,7 +64,6 @@ type restoreFinalizerReconciler struct {
 	metrics           *metrics.ServerMetrics
 	clock             clock.WithTickerAndDelayedExecution
 	crClient          client.Client
-	vgsClient         *csiutil.VGSClient
 	multiHookTracker  *hook.MultiHookTracker
 	resourceTimeout   time.Duration
 }
@@ -79,8 +76,6 @@ func NewRestoreFinalizerReconciler(
 	backupStoreGetter persistence.ObjectBackupStoreGetter,
 	metrics *metrics.ServerMetrics,
 	crClient client.Client,
-	dynamicClient dynamic.Interface,
-	discoveryClient discovery.DiscoveryInterface,
 	multiHookTracker *hook.MultiHookTracker,
 	resourceTimeout time.Duration,
 ) *restoreFinalizerReconciler {
@@ -93,7 +88,6 @@ func NewRestoreFinalizerReconciler(
 		metrics:           metrics,
 		clock:             &clock.RealClock{},
 		crClient:          crClient,
-		vgsClient:         csiutil.NewVGSClient(dynamicClient, discoveryClient, logger),
 		multiHookTracker:  multiHookTracker,
 		resourceTimeout:   resourceTimeout,
 	}
@@ -189,7 +183,6 @@ func (r *restoreFinalizerReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		backupStore:        backupStore,
 		restore:            restore,
 		crClient:           r.crClient,
-		vgsClient:          r.vgsClient,
 		backupVolumeInfos:  backupVolumeInfos,
 		restoreVolumeInfos: restoreVolumeInfos,
 		restoredPVCList:    restoredPVCList,
@@ -307,7 +300,6 @@ type finalizerContext struct {
 	logger                   logrus.FieldLogger
 	restore                  *velerov1api.Restore
 	crClient                 client.Client
-	vgsClient                *csiutil.VGSClient
 	backupStore              persistence.BackupStore
 	backupVolumeInfos        []*volume.BackupVolumeInfo
 	restoreVolumeInfos       []*volume.RestoreVolumeInfo
@@ -504,8 +496,9 @@ func (ctx *finalizerContext) hasVolumeGroupSnapshotHandles() bool {
 func (ctx *finalizerContext) cleanupStubVGSC() (warnings results.Result) {
 	ctx.logger.Info("cleaning up stub VolumeGroupSnapshotContents")
 
-	vgscList, err := ctx.vgsClient.ListVGSC(
+	vgscList, err := csiutil.ListVGSC(
 		context.Background(),
+		ctx.crClient,
 		map[string]string{velerov1api.RestoreNameLabel: ctx.restore.Name},
 	)
 	if err != nil {
@@ -571,7 +564,7 @@ func (ctx *finalizerContext) cleanupStubVGSC() (warnings results.Result) {
 		}
 
 		log.Info("deleting stub VolumeGroupSnapshotContent")
-		if err := ctx.vgsClient.DeleteVGSC(context.Background(), vgsc.Name); err != nil {
+		if err := csiutil.DeleteVGSC(context.Background(), ctx.crClient, vgsc.Name); err != nil {
 			if apierrors.IsNotFound(err) {
 				log.Info("stub VolumeGroupSnapshotContent already deleted")
 				continue

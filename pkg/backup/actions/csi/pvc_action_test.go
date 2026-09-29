@@ -54,9 +54,9 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/label"
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
 	velerotest "github.com/vmware-tanzu/velero/pkg/test"
-	"github.com/vmware-tanzu/velero/pkg/test/vgstest"
 	uploaderUtil "github.com/vmware-tanzu/velero/pkg/uploader/util"
 	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
+	csi "github.com/vmware-tanzu/velero/pkg/util/csi"
 )
 
 const testDriver = "csi.example.com"
@@ -588,8 +588,6 @@ func TestNewPVCBackupItemAction(t *testing.T) {
 
 	f1 := &factorymocks.Factory{}
 	f1.On("KubebuilderClient").Return(crClient, nil)
-	f1.On("DynamicClient").Return(nil, nil)
-	f1.On("DiscoveryClient").Return(nil, nil)
 	plugin1 := NewPvcBackupItemAction(f1)
 	_, err1 := plugin1(logger)
 	require.NoError(t, err1)
@@ -1323,8 +1321,8 @@ func TestDetermineVGSClass(t *testing.T) {
 			}
 
 			action := &pvcBackupItemAction{
-				log:       logrus.New(),
-				vgsClient: vgstest.NewFakeVGSClient(t, "v1", initObjs...),
+				log:      logrus.New(),
+				crClient: velerotest.NewFakeControllerRuntimeClientWithVGS(t, initObjs...),
 			}
 
 			result, err := action.determineVGSClass(t.Context(), testDriver, tt.backup, tt.pvc)
@@ -1361,10 +1359,10 @@ func TestCreateVolumeGroupSnapshot(t *testing.T) {
 	}
 
 	log := logrus.New()
-	vgsClient := vgstest.NewFakeVGSClient(t, "v1")
+	crClient := velerotest.NewFakeControllerRuntimeClientWithVGS(t)
 	action := &pvcBackupItemAction{
-		log:       log,
-		vgsClient: vgsClient,
+		log:      log,
+		crClient: crClient,
 	}
 
 	vgs, err := action.createVolumeGroupSnapshot(t.Context(), testBackup, testPVC, testLabelKey, testLabelValue, testVGSClass)
@@ -1381,7 +1379,7 @@ func TestCreateVolumeGroupSnapshot(t *testing.T) {
 	assert.Equal(t, string(testBackup.UID), vgs.Labels[velerov1api.BackupUIDLabel])
 
 	// Check that it exists in the fake client
-	retrieved, err := vgsClient.GetVGS(t.Context(), vgs.Namespace, vgs.Name)
+	retrieved, err := csi.GetVGS(t.Context(), crClient, vgs.Namespace, vgs.Name)
 	require.NoError(t, err)
 	require.NotNil(t, retrieved)
 }
@@ -1695,10 +1693,10 @@ func TestPatchVGSCDeletionPolicy(t *testing.T) {
 				},
 			}
 
-			vgsClient := vgstest.NewFakeVGSClient(t, "v1", vgsc)
+			crClient := velerotest.NewFakeControllerRuntimeClientWithVGS(t, vgsc)
 			action := &pvcBackupItemAction{
-				log:       velerotest.NewLogger(),
-				vgsClient: vgsClient,
+				log:      velerotest.NewLogger(),
+				crClient: crClient,
 			}
 
 			err := action.patchVGSCDeletionPolicy(t.Context(), vgs)
@@ -1708,7 +1706,7 @@ func TestPatchVGSCDeletionPolicy(t *testing.T) {
 			}
 			require.NoError(t, err)
 
-			updated, err := vgsClient.GetVGSC(t.Context(), "test-vgsc")
+			updated, err := csi.GetVGSC(t.Context(), crClient, "test-vgsc")
 			require.NoError(t, err)
 			require.Equal(t, tt.expectedPolicy, updated.Spec.DeletionPolicy)
 		})
@@ -1774,10 +1772,10 @@ func TestDeleteVGSAndVGSC(t *testing.T) {
 				objs = append(objs, tt.existingVGSC)
 			}
 
-			vgsClient := vgstest.NewFakeVGSClient(t, "v1", objs...)
+			crClient := velerotest.NewFakeControllerRuntimeClientWithVGS(t, objs...)
 			action := &pvcBackupItemAction{
-				log:       velerotest.NewLogger(),
-				vgsClient: vgsClient,
+				log:      velerotest.NewLogger(),
+				crClient: crClient,
 			}
 
 			err := action.deleteVGSAndVGSC(t.Context(), tt.vgs)
@@ -1785,12 +1783,12 @@ func TestDeleteVGSAndVGSC(t *testing.T) {
 
 			// Check VGSC is deleted
 			if tt.expectVGSCDelete {
-				_, err = vgsClient.GetVGSC(t.Context(), "test-vgsc")
+				_, err = csi.GetVGSC(t.Context(), crClient, "test-vgsc")
 				assert.True(t, apierrors.IsNotFound(err), "expected VGSC to be deleted")
 			}
 
 			// Check VGS is deleted
-			_, err = vgsClient.GetVGS(t.Context(), "ns", "test-vgs")
+			_, err = csi.GetVGS(t.Context(), crClient, "ns", "test-vgs")
 			assert.True(t, apierrors.IsNotFound(err), "expected VGS to be deleted")
 		})
 	}
@@ -1920,8 +1918,8 @@ func TestWaitForVGSCBinding(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			action := &pvcBackupItemAction{
-				log:       velerotest.NewLogger(),
-				vgsClient: vgstest.NewFakeVGSClient(t, "v1", tt.vgs.DeepCopy()),
+				log:      velerotest.NewLogger(),
+				crClient: velerotest.NewFakeControllerRuntimeClientWithVGS(t, tt.vgs.DeepCopy()),
 			}
 
 			err := action.waitForVGSCBinding(t.Context(), tt.vgs, 1*time.Second)
@@ -1988,15 +1986,15 @@ func TestGetVGSByLabels(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var vgsClient = vgstest.NewFakeVGSClient(t, "v1", tt.vgsObjects...)
+			var crClient = velerotest.NewFakeControllerRuntimeClientWithVGS(t, tt.vgsObjects...)
 			if tt.name == "client list error" {
 				// Simulate the VGS API being unavailable, which surfaces as a list error.
-				vgsClient = vgstest.NewFakeVGSClientUnavailable(t)
+				crClient = velerotest.NewFakeControllerRuntimeClientBuilder(t).WithRESTMapper(velerotest.VGSTestRESTMapper()).Build()
 			}
 
 			action := &pvcBackupItemAction{
-				log:       velerotest.NewLogger(),
-				vgsClient: vgsClient,
+				log:      velerotest.NewLogger(),
+				crClient: crClient,
 			}
 
 			vgs, err := action.getVGSByLabels(t.Context(), "test-ns", testLabels)

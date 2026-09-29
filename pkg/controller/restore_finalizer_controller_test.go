@@ -57,8 +57,8 @@ import (
 	pluginmocks "github.com/vmware-tanzu/velero/pkg/plugin/mocks"
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
 	velerotest "github.com/vmware-tanzu/velero/pkg/test"
-	"github.com/vmware-tanzu/velero/pkg/test/vgstest"
 	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
+	csiutil "github.com/vmware-tanzu/velero/pkg/util/csi"
 	pkgUtilKubeMocks "github.com/vmware-tanzu/velero/pkg/util/kube/mocks"
 	"github.com/vmware-tanzu/velero/pkg/util/results"
 )
@@ -163,8 +163,6 @@ func TestRestoreFinalizerReconcile(t *testing.T) {
 				NewFakeSingleObjectBackupStoreGetter(backupStore),
 				metrics.NewServerMetrics(),
 				fakeClient,
-				nil, // dynamicClient: not exercised by this test
-				nil, // discoveryClient: not exercised by this test
 				hook.NewMultiHookTracker(),
 				10*time.Minute,
 			)
@@ -235,8 +233,6 @@ func TestUpdateResult(t *testing.T) {
 		NewFakeSingleObjectBackupStoreGetter(backupStore),
 		metrics.NewServerMetrics(),
 		fakeClient,
-		nil, // dynamicClient: not exercised by this test
-		nil, // discoveryClient: not exercised by this test
 		hook.NewMultiHookTracker(),
 		10*time.Minute,
 	)
@@ -1165,25 +1161,25 @@ func TestCleanupStubVGSC(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			fakeClient := velerotest.NewFakeControllerRuntimeClientBuilder(t).Build()
 			logger := velerotest.NewLogger()
 
-			var vgscSeed []runtime.Object
+			// One VGS-capable client holds both the stub VGSCs (deleted via the csi
+			// helpers, which route through the RESTMapper) and the VSCs (read directly
+			// by cleanupStubVGSC's readiness wait).
+			var seed []runtime.Object
 			for _, vgsc := range tc.existingVGSCs {
-				vgscSeed = append(vgscSeed, vgsc)
+				seed = append(seed, vgsc)
 			}
-			vgsClient := vgstest.NewFakeVGSClient(t, "v1", vgscSeed...)
+			for _, vsc := range tc.existingVSCs {
+				seed = append(seed, vsc)
+			}
+			crClient := velerotest.NewFakeControllerRuntimeClientWithVGS(t, seed...)
 
 			ctx := &finalizerContext{
 				logger:          logger,
-				crClient:        fakeClient,
-				vgsClient:       vgsClient,
+				crClient:        crClient,
 				restore:         tc.restore,
 				resourceTimeout: 10 * time.Second,
-			}
-
-			for _, vsc := range tc.existingVSCs {
-				require.NoError(t, fakeClient.Create(t.Context(), vsc))
 			}
 
 			warnings := ctx.cleanupStubVGSC()
@@ -1194,7 +1190,7 @@ func TestCleanupStubVGSC(t *testing.T) {
 				assert.True(t, warnings.IsEmpty(), "expected no warnings")
 			}
 
-			remainingList, err := vgsClient.ListVGSC(t.Context(), nil)
+			remainingList, err := csiutil.ListVGSC(t.Context(), crClient, nil)
 			require.NoError(t, err)
 			assert.Len(t, remainingList.Items, tc.expectedRemaining)
 

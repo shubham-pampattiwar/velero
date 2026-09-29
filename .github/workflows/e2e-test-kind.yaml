@@ -2,6 +2,7 @@ name: "Run the E2E test on kind"
 permissions:
   contents: read
 env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   # Reviewed commit pins for third-party sources this workflow clones and executes.
   # Bump them deliberately after reviewing the upstream changes.
   # bitnami/containers: [bitnami/minio] Release 2026.7.17-debian-12-r0

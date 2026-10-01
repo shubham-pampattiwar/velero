@@ -9,8 +9,9 @@ place and do not drift.
 Velero runs a server (a set of controllers) as a single replica deployment in your cluster and a command-line
 client that runs locally. Backups and restores are driven by Kubernetes custom
 resources and reconciled by the server. Volume data is moved by the built-in
-file-system backup and by the data mover, and object and volume snapshot
-operations are handled through provider plugins.
+[file-system backup](https://velero.io/docs/main/file-system-backup/) and by the
+[data mover](https://velero.io/docs/main/csi-snapshot-data-movement/), and object
+and volume snapshot operations are handled through provider plugins.
 
 For the full component overview, the backup and restore flows, and the object
 storage and snapshot model, see:
